@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@theme {
+  --font-manrope: "Manrope", sans-serif;
+  --font-inter: "Inter", sans-serif;
+
+  --color-primary: var(--primary);
+  --color-primary-container: var(--primary-container);
+  --color-surface: var(--surface);
+  --color-surface-container-low: var(--surface-container-low);
+  --color-surface-container-lowest: var(--surface-container-lowest);
+  --color-on-surface: var(--on-surface);
+  --color-on-surface-variant: var(--on-surface-variant);
+  --color-outline-variant: var(--outline-variant);
+  
+  --radius-xl: 1.5rem;
+}
+
+@layer base {
+  :root {
+    --primary: #0054cd;
+    --primary-container: #316ee9;
+    --surface: #f9f9fe;
+    --surface-container-low: #f3f3f8;
+    --surface-container-lowest: #ffffff;
+    --on-surface: #1a1c1f;
+    --on-surface-variant: #414755;
+    --outline-variant: #c1c6d7;
+  }
+  .dark {
+    --primary: #a8c7fa;
+    --primary-container: #004a77;
+    --surface: #111318;
+    --surface-container-low: #1d2024;
+    --surface-container-lowest: #0e1014;
+    --on-surface: #e2e2e9;
+    --on-surface-variant: #c4c6d0;
+    --outline-variant: #44474e;
+  }
+  
+  body {
+    @apply bg-surface text-on-surface font-inter antialiased transition-colors duration-300;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply font-manrope;
+  }
+}
+
+.glass-effect {
+  @apply bg-surface/80 backdrop-blur-xl transition-colors duration-300;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Keep fixed app chrome below the iOS status bar and home indicator. */
+.app-header {
+  height: calc(4rem + env(safe-area-inset-top));
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-header {
+  padding-top: env(safe-area-inset-top);
+}
+
+.app-main {
+  padding-top: calc(5rem + env(safe-area-inset-top));
+}
+
+.app-bottom-nav {
+  padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+}
