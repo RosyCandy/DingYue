@@ -85,7 +85,7 @@
 
 * 本地开发：建议保持 `VITE_API_BASE_URL="/api"`（使用 Vite 代理转发到本地后端）。
 * 服务器网页：设置为 `VITE_API_BASE_URL="/api"`，由 Nginx 转发到 Node.js 的 `3001` 端口。
-* 移动端打包：设置为公网 API 地址，例如 `VITE_API_BASE_URL="http://47.99.119.180/api"`。
+* 移动端打包：设置为公网 API 地址，例如 `VITE_API_BASE_URL="https://ngaasiu.studio/api"`。
 
 这样打包后的 iPhone App 也能直接访问你的服务器后端，不依赖本机 `localhost`。
 
@@ -107,10 +107,10 @@ npm run build
 CAPACITOR_SERVER_URL="http://你的局域网IP:3000" npm run cap:sync
 ```
 
-你的服务器公网 IP 是 `47.99.119.180`。部署到 ECS 后，网页前端使用 `VITE_API_BASE_URL="/api"`，由 Nginx 转发 `/api` 到 Node 服务；原生 App 构建时则使用完整公网地址：
+你的服务器公网 IP 是 `47.253.184.255`。部署到 ECS 后，网页前端使用 `VITE_API_BASE_URL="/api"`，由 Nginx 转发 `/api` 到 Node 服务；原生 App 构建时则使用完整公网地址：
 
 ```bash
-VITE_API_BASE_URL="http://47.99.119.180/api" npm run cap:sync
+VITE_API_BASE_URL="https://ngaasiu.studio/api" npm run cap:sync
 ```
 
 后端生产环境必须设置 `JWT_SECRET`，不要使用示例值。可以在服务器生成：
@@ -164,16 +164,16 @@ curl -I http://47.99.119.180
 
 ### Git 版本管理
 
-当前版本按 `1.0.2` 管理。建议发布前提交并打标签：
+当前版本按 `1.0.3` 管理。建议发布前提交并打标签：
 
 ```bash
 git add .
-git commit -m "release: 1.0.2"
-git tag -a v1.0.2 -m "DingYue 1.0.2"
+git commit -m "release: 1.0.3"
+git tag -a v1.0.3 -m "DingYue 1.0.3"
 git push origin main --tags
 ```
 
-服务器只部署稳定版本时，可以使用 `git fetch --tags` 后执行 `git checkout v1.0.2`；日常开发继续使用 `main` 分支。
+服务器只部署稳定版本时，可以使用 `git fetch --tags` 后执行 `git checkout v1.0.3`；日常开发继续使用 `main` 分支。
 
 ### 不绑定域名时使用 HTTPS
 
