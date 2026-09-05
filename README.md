@@ -119,15 +119,15 @@ VITE_API_BASE_URL="http://47.99.119.180/api" npm run cap:sync
 openssl rand -hex 32
 ```
 
-`.env`、数据库密码、JWT 密钥和上传文件不应提交到 Gitee；仓库只提交 `.env.example` 和源代码。
+`.env`、数据库密码、JWT 密钥和上传文件不应提交到 GitHub；仓库只提交 `.env.example` 和源代码。
 
-### Gitee 服务器发布流程
+### GitHub 服务器发布流程
 
-服务器不需要连接 GitHub，使用 Gitee 作为代码源。首次部署：
+使用 GitHub 作为代码源。首次部署：
 
 ```bash
-git clone https://gitee.com/RosyCandy/duoduo.git /var/www/duoduo
-cd /var/www/duoduo
+git clone https://github.com/RosyCandy/DingYue.git /var/www/DingYue
+cd /var/www/DingYue
 npm ci
 cp .env.example .env
 # 编辑 .env，填写真实数据库密码、GOOGLE_CLIENT_ID 和 JWT_SECRET
@@ -138,16 +138,16 @@ VITE_API_BASE_URL=/api npm run build
 以后服务器更新代码：
 
 ```bash
-cd /var/www/duoduo
+cd /var/www/DingYue
 git pull --ff-only origin main
 npm ci
 npm run lint
 VITE_API_BASE_URL=/api npm run build
-sudo systemctl restart duoduo-api
-sudo rsync -a --delete dist/ /var/www/duoduo-web/
+sudo systemctl restart DingYue-api
+sudo rsync -a --delete dist/ /var/www/DingYue-web/
 ```
 
-Node 服务建议使用 `systemd` 常驻运行，服务文件中的 `WorkingDirectory` 指向项目目录，`EnvironmentFile` 指向服务器上的 `.env`。Nginx 网站根目录建议使用 `/var/www/duoduo-web`，并把 `/api/` 反向代理到 `127.0.0.1:3001`。ECS 安全组只开放 `80`、`443` 和 `22`，不要开放 MySQL 的 `3306` 或 Node 的 `3001`。
+Node 服务建议使用 `systemd` 常驻运行，服务文件中的 `WorkingDirectory` 指向项目目录，`EnvironmentFile` 指向服务器上的 `.env`。Nginx 网站根目录建议使用 `/var/www/DingYue-web`，并把 `/api/` 反向代理到 `127.0.0.1:3001`。ECS 安全组只开放 `80`、`443` 和 `22`，不要开放 MySQL 的 `3306` 或 Node 的 `3001`。
 
 每次发布后验收：
 
@@ -164,16 +164,16 @@ curl -I http://47.99.119.180
 
 ### Git 版本管理
 
-今天这版按 `1.0.0` 管理。建议发布前提交并打标签：
+当前版本按 `1.0.2` 管理。建议发布前提交并打标签：
 
 ```bash
 git add .
-git commit -m "release: 1.0.0"
-git tag -a v1.0.0 -m "DuoDuo 1.0.0"
+git commit -m "release: 1.0.2"
+git tag -a v1.0.2 -m "DingYue 1.0.2"
 git push origin main --tags
 ```
 
-服务器只部署稳定版本时，可以使用 `git fetch --tags` 后执行 `git checkout v1.0.0`；日常开发继续使用 `main` 分支。
+服务器只部署稳定版本时，可以使用 `git fetch --tags` 后执行 `git checkout v1.0.2`；日常开发继续使用 `main` 分支。
 
 ### 不绑定域名时使用 HTTPS
 
