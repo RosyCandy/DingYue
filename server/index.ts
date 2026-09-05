@@ -33,6 +33,9 @@ if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
   throw new Error('JWT_SECRET must be set in production');
 }
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+if (process.env.NODE_ENV === 'production' && !GOOGLE_CLIENT_ID) {
+  throw new Error('GOOGLE_CLIENT_ID must be set in production');
+}
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 type AuthTokenPayload = {
@@ -90,6 +93,9 @@ app.use(cors());
 app.use(morgan('dev'));
 app.use(express.json());
 app.use('/api/uploads', express.static(UPLOAD_ROOT));
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, service: 'duoduo-api' });
+});
 
 // 2. 连接池在所有路由之前定义
 const pool = mysql.createPool({

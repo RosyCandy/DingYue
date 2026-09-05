@@ -5,6 +5,10 @@ import {defineConfig, loadEnv} from 'vite';
 
 export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
+  const isProduction = mode === 'production';
+  if (isProduction && !env.VITE_GOOGLE_CLIENT_ID) {
+    throw new Error('VITE_GOOGLE_CLIENT_ID is required for production builds.');
+  }
   return {
     plugins: [react(), tailwindcss()],
     define: {

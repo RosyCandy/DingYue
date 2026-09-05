@@ -84,11 +84,22 @@
 前端会读取环境变量 `VITE_API_BASE_URL` 作为 API 根地址：
 
 * 本地开发：建议保持 `VITE_API_BASE_URL="/api"`（使用 Vite 代理转发到本地后端）。
-* 服务器/移动端打包：设置为公网 API 地址，例如 `VITE_API_BASE_URL="https://api.your-domain.com/api"`。
+* 服务器网页：设置为 `VITE_API_BASE_URL="/api"`，由 Nginx 转发到 Node.js 的 `3001` 端口。
+* 移动端打包：设置为公网 API 地址，例如 `VITE_API_BASE_URL="http://47.99.119.180/api"`。
 
 这样打包后的 iPhone App 也能直接访问你的服务器后端，不依赖本机 `localhost`。
 
 ### 生产部署注意事项
+
+前端环境变量是在 `npm run build` 时写入静态文件的，不能只在 Node 进程启动时设置。生产构建前必须设置以下变量：
+
+```bash
+export VITE_GOOGLE_CLIENT_ID="你的 Google Web client ID"
+export VITE_API_BASE_URL="/api"
+npm run build
+```
+
+后端进程还必须设置相同的 `GOOGLE_CLIENT_ID`、数据库变量、`JWT_SECRET` 和 `NODE_ENV=production`。如果缺少 Google client ID，构建或启动会直接报错，不会再生成表面可打开但无法登录的页面。
 
 生产构建时不要设置 `CAPACITOR_SERVER_URL`，否则原生 App 会继续加载开发电脑上的 Vite 服务。只有本地调试原生 App 时才设置它，例如：
 
@@ -96,10 +107,10 @@
 CAPACITOR_SERVER_URL="http://你的局域网IP:3000" npm run cap:sync
 ```
 
-部署到 ECS 后，网页前端使用 `VITE_API_BASE_URL="/api"`，由 Nginx 转发 `/api` 到 Node 服务；原生 App 构建时则使用完整公网地址：
+你的服务器公网 IP 是 `47.99.119.180`。部署到 ECS 后，网页前端使用 `VITE_API_BASE_URL="/api"`，由 Nginx 转发 `/api` 到 Node 服务；原生 App 构建时则使用完整公网地址：
 
 ```bash
-VITE_API_BASE_URL="https://ngaasiu.studio/api" npm run cap:sync
+VITE_API_BASE_URL="http://47.99.119.180/api" npm run cap:sync
 ```
 
 后端生产环境必须设置 `JWT_SECRET`，不要使用示例值。可以在服务器生成：
@@ -108,6 +119,64 @@ VITE_API_BASE_URL="https://ngaasiu.studio/api" npm run cap:sync
 openssl rand -hex 32
 ```
 
-`.env`、数据库密码、JWT 密钥和上传文件不应提交到 GitHub；仓库只提交 `.env.example` 和源代码。
+`.env`、数据库密码、JWT 密钥和上传文件不应提交到 Gitee；仓库只提交 `.env.example` 和源代码。
 
-域名的 `AAAA` 记录应指向 ECS 的公网 IPv6。为了兼容只支持 IPv4 的网络，建议同时绑定公网 IPv4 并添加 `A` 记录。DNS 之外还需要在 ECS 安全组放行 80 和 443 端口，Nginx 同时监听 IPv4 与 IPv6。
+### Gitee 服务器发布流程
+
+服务器不需要连接 GitHub，使用 Gitee 作为代码源。首次部署：
+
+```bash
+git clone https://gitee.com/RosyCandy/duoduo.git /var/www/duoduo
+cd /var/www/duoduo
+npm ci
+cp .env.example .env
+# 编辑 .env，填写真实数据库密码、GOOGLE_CLIENT_ID 和 JWT_SECRET
+npm run lint
+VITE_API_BASE_URL=/api npm run build
+```
+
+以后服务器更新代码：
+
+```bash
+cd /var/www/duoduo
+git pull --ff-only origin main
+npm ci
+npm run lint
+VITE_API_BASE_URL=/api npm run build
+sudo systemctl restart duoduo-api
+sudo rsync -a --delete dist/ /var/www/duoduo-web/
+```
+
+Node 服务建议使用 `systemd` 常驻运行，服务文件中的 `WorkingDirectory` 指向项目目录，`EnvironmentFile` 指向服务器上的 `.env`。Nginx 网站根目录建议使用 `/var/www/duoduo-web`，并把 `/api/` 反向代理到 `127.0.0.1:3001`。ECS 安全组只开放 `80`、`443` 和 `22`，不要开放 MySQL 的 `3306` 或 Node 的 `3001`。
+
+每次发布后验收：
+
+```bash
+curl http://47.99.119.180/api/health
+curl -I http://47.99.119.180
+```
+
+浏览器打开 `http://47.99.119.180`，在开发者工具 Network 中确认 API 请求指向 `47.99.119.180/api`，而不是 `localhost`。
+
+### 服务器调试流程
+
+修改服务器代码后先执行 `npm run lint`；后端调试可临时执行 `npm run server` 查看日志，确认无误后重启 `duoduo-api`。前端代码修改必须重新执行 `VITE_API_BASE_URL=/api npm run build` 并同步 `dist`，已经安装的 App 则必须重新执行 `npm run cap:sync` 后重新生成 APK/AAB 或 iOS 安装包。
+
+### Git 版本管理
+
+今天这版按 `1.0.0` 管理。建议发布前提交并打标签：
+
+```bash
+git add .
+git commit -m "release: 1.0.0"
+git tag -a v1.0.0 -m "DuoDuo 1.0.0"
+git push origin main --tags
+```
+
+服务器只部署稳定版本时，可以使用 `git fetch --tags` 后执行 `git checkout v1.0.0`；日常开发继续使用 `main` 分支。
+
+### 不绑定域名时使用 HTTPS
+
+不绑定域名可以先通过 `http://47.99.119.180` 使用网站。正式环境建议使用 HTTPS。免费证书通常要求域名；Let's Encrypt 已开始支持 IP 地址证书时，证书有效期会比域名证书短，且申请工具需要确认支持 IP SAN。申请失败时，最稳定的免费方案是注册一个域名后使用 Let's Encrypt 自动续期。
+
+如果网页使用 HTTPS，App 和网页 API 都必须使用 `https://47.99.119.180/api`，不能混用 HTTP，否则浏览器会拦截混合内容，iOS 也可能因 ATS 拒绝连接。没有 HTTPS 时，移动端暂时使用 `http://47.99.119.180/api`，仅建议用于测试。
