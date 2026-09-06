@@ -13,7 +13,9 @@
     "lint": "tsc --noEmit",
     "cap:sync": "vite build && npx cap sync",
     "cap:open:ios": "npx cap open ios",
-    "cap:open:android": "npx cap open android"
+    "cap:open:android": "npx cap open android",
+    "apk": "bash scripts/build-apk.sh",
+    "release": "bash scripts/release.sh"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.1",

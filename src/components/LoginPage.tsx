@@ -14,7 +14,7 @@ import {
     beginQqLogin,
     SOCIAL_LOGIN_ERROR_KEY
 } from '../lib/socialAuth';
-import { isPasskeySupported, loginWithPasskey, isPasskeyUserCancellation } from '../lib/passkey';
+import { loginWithPasskey, isPasskeyUserCancellation } from '../lib/passkey';
 
 type Mode = 'login' | 'register' | 'forgot';
 
@@ -34,7 +34,6 @@ export default function LoginPage() {
     const [codeSending, setCodeSending] = useState(false);
     const [countdown, setCountdown] = useState(0);
     const [passkeyLoading, setPasskeyLoading] = useState(false);
-    const [passkeySupported] = useState(() => isPasskeySupported());
     const native = isNativePlatform();
 
     const wechatAvailable = isWechatLoginAvailable();
@@ -235,7 +234,7 @@ export default function LoginPage() {
                         {loading ? '处理中...' : submitLabel}
                     </button>
 
-                    {mode === 'login' && passkeySupported && (
+                    {mode === 'login' && (
                         <button onClick={() => void handlePasskeyLogin()} disabled={passkeyLoading}
                                 className="w-full py-3 rounded-xl border border-outline-variant/30 bg-surface-container-low text-on-surface font-bold text-sm active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
                             <Fingerprint size={18} />
