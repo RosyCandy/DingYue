@@ -96,17 +96,17 @@ export default function NotificationCenter({ onClose }: { onClose: () => void })
         </div>
       </header>
 
-      <main className="max-w-2xl mx-auto px-6 pt-24 pb-32 space-y-4 overflow-y-auto no-scrollbar flex-1 w-full">
+      <main className="max-w-2xl mx-auto px-6 pt-28 pb-32 space-y-5 overflow-y-auto no-scrollbar flex-1 w-full">
         <div className="flex items-center justify-between">
           <p className="text-xs font-semibold text-on-surface-variant">
-            {unreadCount > 0 ? `${unreadCount} unread` : 'All caught up'}
+            {unreadCount > 0 ? t('notifications.unread').replace('{count}', String(unreadCount)) : t('notifications.allCaughtUp')}
           </p>
           <button
             onClick={markAllRead}
             disabled={unreadCount === 0 || loading}
             className="text-xs font-bold text-primary disabled:opacity-40 flex items-center gap-1"
           >
-            <CheckCheck size={14} /> Mark all read
+            <CheckCheck size={14} /> {t('notifications.markAllRead')}
           </button>
         </div>
 
@@ -168,7 +168,7 @@ export default function NotificationCenter({ onClose }: { onClose: () => void })
                               ? "bg-orange-50 text-orange-600"
                               : "bg-blue-50 text-blue-600"
                         )}>
-                          {item.severity}
+                          {t(`notifications.severity.${item.severity}`)}
                         </span>
                       </div>
 

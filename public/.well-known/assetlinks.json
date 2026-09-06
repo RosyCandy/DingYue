@@ -1,0 +1,15 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls",
+      "delegate_permission/common.get_login_creds"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.duoduo.app",
+      "sha256_cert_fingerprints": [
+        "71:4C:9D:98:4B:5D:64:FD:BF:86:34:41:D3:EA:3E:3B:C1:92:97:48:B5:50:D3:B1:11:68:3E:A5:8F:B7:4C:9B"
+      ]
+    }
+  }
+]

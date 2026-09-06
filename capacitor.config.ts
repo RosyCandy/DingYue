@@ -8,6 +8,13 @@ const config: CapacitorConfig = {
   appId: 'com.duoduo.app',
   appName: 'DuoDuo',
   webDir: 'dist',
+  plugins: {
+    CapacitorPasskey: {
+      origin: process.env.PASSKEY_ORIGIN?.trim() || 'https://ngaasiu.studio',
+      domains: ['ngaasiu.studio'],
+      autoShim: true,
+    },
+  },
   ...(developmentServerUrl
     ? {
         server: {

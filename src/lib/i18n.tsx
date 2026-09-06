@@ -91,6 +91,12 @@ const baseTranslations = {
     // Notifications
     'notifications.title': 'Message Center',
     'notifications.empty': 'No new notifications',
+    'notifications.unread': '{count} unread',
+    'notifications.allCaughtUp': 'All caught up',
+    'notifications.markAllRead': 'Mark all read',
+    'notifications.severity.info': 'Info',
+    'notifications.severity.warning': 'Warning',
+    'notifications.severity.critical': 'Urgent',
     'notifications.expiresIn': 'Expires in {days} days',
     'notifications.expiresTomorrow': 'Expires tomorrow',
     'notifications.expiresToday': 'Expires today!',
@@ -143,6 +149,8 @@ const baseTranslations = {
     'dashboard.freeTrials': 'Free Trials',
     'dashboard.dueForReview': 'Due for review',
     'dashboard.timeline': 'Timeline',
+    'dashboard.timelineEmpty': 'No billing events yet',
+    'dashboard.timelineEmptyHint': 'Add a subscription to see its renewal timeline here.',
 
     // Subscriptions
     'subs.searchPlaceholder': 'Search subscriptions...',
@@ -207,6 +215,8 @@ const baseTranslations = {
     'stats.reviewDetails': 'Review Details',
     'stats.loadFailed': 'Failed to load stats',
     'stats.noData': 'No data',
+    'stats.emptyTitle': 'Nothing to analyze yet',
+    'stats.emptyDescription': 'Add your subscriptions and your spending trends will appear here.',
     'stats.nextCycleForecast': 'Next cycle forecast: ${amount} across {count} active subscriptions.',
     'stats.suggestedSavingsFor': 'Suggested savings for',
     'stats.stackedPlans': 'stacked plans',
@@ -357,6 +367,12 @@ const baseTranslations = {
     // Notifications
     'notifications.title': '消息中心',
     'notifications.empty': '暂无新通知',
+    'notifications.unread': '{count} 条未读通知',
+    'notifications.allCaughtUp': '已全部读完',
+    'notifications.markAllRead': '全部标为已读',
+    'notifications.severity.info': '提示',
+    'notifications.severity.warning': '提醒',
+    'notifications.severity.critical': '紧急',
     'notifications.expiresIn': '将在 {days} 天后到期',
     'notifications.expiresTomorrow': '将于明天到期',
     'notifications.expiresToday': '今天到期！',
@@ -409,6 +425,8 @@ const baseTranslations = {
     'dashboard.freeTrials': '免费试用',
     'dashboard.dueForReview': '待审核',
     'dashboard.timeline': '账单时间线',
+    'dashboard.timelineEmpty': '还没有账单事件',
+    'dashboard.timelineEmptyHint': '添加订阅后，续费时间线会显示在这里。',
 
     // Subscriptions
     'subs.searchPlaceholder': '搜索订阅...',
@@ -473,6 +491,8 @@ const baseTranslations = {
     'stats.reviewDetails': '查看详情',
     'stats.loadFailed': '加载统计失败',
     'stats.noData': '暂无数据',
+    'stats.emptyTitle': '暂时没有可分析的数据',
+    'stats.emptyDescription': '添加订阅后，支出趋势会显示在这里。',
     'stats.nextCycleForecast': '下个周期预测：{count} 个活跃订阅共需 ${amount}。',
     'stats.suggestedSavingsFor': '建议节省对象',
     'stats.stackedPlans': '重叠套餐',

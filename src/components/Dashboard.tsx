@@ -246,8 +246,14 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
           <h2 className="text-xl font-bold tracking-tight px-1">{t('dashboard.timeline')}</h2>
         </div>
 
-        <div className="relative border-l-2 border-outline-variant/20 ml-2 space-y-4 py-2">
-          {timelineSubscriptions.map((sub) => {
+        {timelineSubscriptions.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-outline-variant/40 bg-surface-container-low px-5 py-8 text-center">
+            <p className="font-semibold text-on-surface">{t('dashboard.timelineEmpty')}</p>
+            <p className="mt-1 text-sm text-on-surface-variant">{t('dashboard.timelineEmptyHint')}</p>
+          </div>
+        ) : (
+          <div className="relative border-l-2 border-outline-variant/20 ml-2 space-y-4 py-2">
+            {timelineSubscriptions.map((sub) => {
             const date = sub.nextBillingDate ? new Date(sub.nextBillingDate) : new Date();
             const month = date.toLocaleString('default', { month: 'short' });
             const day = date.getDate();
@@ -289,8 +295,9 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
                 </div>
               </div>
             );
-          })}
-        </div>
+            })}
+          </div>
+        )}
       </section>
     </div>
   );

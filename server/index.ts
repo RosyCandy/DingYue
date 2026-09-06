@@ -88,11 +88,16 @@ if (!smtpConfigured) {
 // 生产环境请在 .env 设置 PASSKEY_RP_ID=ngaasiu.studio 和 PASSKEY_EXPECTED_ORIGINS。
 const PASSKEY_RP_ID = process.env.PASSKEY_RP_ID || 'localhost';
 const PASSKEY_RP_NAME = process.env.PASSKEY_RP_NAME || 'DuoDuo';
-const PASSKEY_EXPECTED_ORIGINS = (process.env.PASSKEY_EXPECTED_ORIGINS ||
-  `http://localhost:3000,https://${PASSKEY_RP_ID}`)
-  .split(',')
-  .map((value) => value.trim())
-  .filter(Boolean);
+const PASSKEY_EXPECTED_ORIGINS = [
+  ...(process.env.PASSKEY_EXPECTED_ORIGINS || `http://localhost:3000,https://${PASSKEY_RP_ID}`)
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+  ...(process.env.PASSKEY_ANDROID_ORIGINS || '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+];
 
 // WebAuthn challenge 只需要存活几分钟，单进程部署直接放内存即可
 const passkeyChallenges = new Map<string, { challenge: string; expiresAt: number }>();
@@ -1358,6 +1363,27 @@ app.post('/api/uploads/icon', authRequired, (req: AuthenticatedRequest, res) => 
     const file = (req as Request & { file?: Express.Multer.File }).file;
     if (!file) {
       return res.status(400).json({ error: 'No image file uploaded' });
+    }
+
+    return res.status(201).json({
+      url: `/api/uploads/icons/${file.filename}`
+    });
+  });
+});
+
+app.post('/api/uploads/avatar', authRequired, (req: AuthenticatedRequest, res) => {
+  uploadIconMiddleware.single('avatar')(req as Request, res, (error: any) => {
+    if (error) {
+      const message = error?.message || 'Upload failed';
+      if (error?.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ error: 'Image file is too large (max 5MB)' });
+      }
+      return res.status(400).json({ error: message });
+    }
+
+    const file = (req as Request & { file?: Express.Multer.File }).file;
+    if (!file) {
+      return res.status(400).json({ error: 'No avatar image uploaded' });
     }
 
     return res.status(201).json({

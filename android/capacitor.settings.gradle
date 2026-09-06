@@ -10,3 +10,6 @@ project(':capawesome-capacitor-apple-sign-in').projectDir = new File('../node_mo
 
 include ':capawesome-capacitor-google-sign-in'
 project(':capawesome-capacitor-google-sign-in').projectDir = new File('../node_modules/@capawesome/capacitor-google-sign-in/android')
+
+include ':capgo-capacitor-passkey'
+project(':capgo-capacitor-passkey').projectDir = new File('../node_modules/@capgo/capacitor-passkey/android')

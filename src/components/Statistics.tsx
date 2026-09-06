@@ -38,6 +38,10 @@ export default function Statistics() {
     return stats.trendData.slice(start, currentIndex + 1);
   }, [stats, timeRange]);
 
+  const hasStatsData = Boolean(
+    stats && (stats.trendData.length > 0 || stats.categoryBreakdown.length > 0 || stats.accountComparison.length > 0)
+  );
+
   if (loading) {
     return (
       <div className="px-6 max-w-7xl mx-auto pb-10 h-72 flex items-center justify-center text-on-surface-variant">
@@ -51,6 +55,19 @@ export default function Statistics() {
       <div className="px-6 max-w-4xl mx-auto pb-10">
         <div className="bg-red-50 border border-red-100 rounded-xl p-4 text-sm text-red-600">
           {error || t('stats.noData')}
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasStatsData) {
+    return (
+      <div className="relative overflow-hidden px-6 max-w-4xl mx-auto pb-10">
+        <div className="pointer-events-none absolute inset-0 opacity-60 [background-image:linear-gradient(to_right,rgba(0,84,205,0.08)_1px,transparent_1px),linear-gradient(to_bottom,rgba(0,84,205,0.08)_1px,transparent_1px)] [background-size:24px_24px]" />
+        <div className="relative min-h-[32rem] rounded-2xl border border-outline-variant/20 bg-surface/75 px-6 py-20 text-center backdrop-blur-sm">
+          <TrendingUp className="mx-auto text-primary/50" size={48} />
+          <h2 className="mt-5 text-2xl font-bold">{t('stats.emptyTitle')}</h2>
+          <p className="mx-auto mt-2 max-w-sm text-sm text-on-surface-variant">{t('stats.emptyDescription')}</p>
         </div>
       </div>
     );

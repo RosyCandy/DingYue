@@ -578,6 +578,20 @@ export const api = {
     return String(data?.url || '');
   },
 
+  async uploadAvatar(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('avatar', file);
+
+    const response = await fetch(`${API_URL}/uploads/avatar`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: formData,
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    const data = await response.json();
+    return String(data?.url || '');
+  },
+
   async getPaymentMethods(): Promise<PaymentMethod[]> {
     const response = await fetch(`${API_URL}/payment-methods`, {
       headers: getAuthHeaders(),

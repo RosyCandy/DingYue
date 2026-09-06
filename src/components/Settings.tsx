@@ -256,7 +256,7 @@ export default function Settings() {
     setActionNotice('');
     setActionError('');
     try {
-      const url = await api.uploadSubscriptionIcon(file);
+      const url = await api.uploadAvatar(file);
       setProfile((prev) => ({ ...prev, avatar: url }));
       await saveProfile({ avatar: url });
     } catch (err) {
