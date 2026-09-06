@@ -38,6 +38,6 @@ TMP=$(mktemp -d)
 cp "$HOME/Desktop/DingYue-v${VERSION}.apk" "${TMP}/DingYue.apk"
 curl -sf -X POST "${AUTH[@]}" -H "Content-Type: application/octet-stream" \
   --data-binary @"${TMP}/DingYue.apk" \
-  "${API}/releases/${RELEASE_ID}/assets?name=DingYue.apk" > /dev/null
+  "https://uploads.github.com/repos/${REPO}/releases/${RELEASE_ID}/assets?name=DingYue.apk" > /dev/null
 
 echo "✅ Release 已发布: https://github.com/${REPO}/releases/tag/${TAG}"
