@@ -28,3 +28,4 @@ ios/App/App/capacitor.config.json
 
 # Runtime-uploaded files
 server/uploads/icons/*
+.idea/
