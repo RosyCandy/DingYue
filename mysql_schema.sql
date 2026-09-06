@@ -3,8 +3,41 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255),
     google_id VARCHAR(255),
+    apple_id VARCHAR(255) UNIQUE,
+    wechat_id VARCHAR(255) UNIQUE,
+    qq_id VARCHAR(255) UNIQUE,
+    avatar VARCHAR(500) NULL,
     name VARCHAR(100),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Email verification codes (register / password reset)
+CREATE TABLE IF NOT EXISTS email_verification_codes (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    purpose ENUM('register', 'reset_password') NOT NULL,
+    code_hash VARCHAR(255) NOT NULL,
+    expires_at DATETIME NOT NULL,
+    used_at DATETIME NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_verification_codes_email_purpose (email, purpose)
+);
+
+-- Passkey (WebAuthn) credentials
+CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    credential_id VARCHAR(512) NOT NULL,
+    credential_public_key TEXT NOT NULL,
+    counter BIGINT NOT NULL DEFAULT 0,
+    transports VARCHAR(255) NULL,
+    device_type VARCHAR(64) NULL,
+    backed_up BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uniq_webauthn_credential_id (credential_id),
+    INDEX idx_webauthn_user_id (user_id),
+    CONSTRAINT fk_webauthn_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- Create the subscriptions table for MySQL

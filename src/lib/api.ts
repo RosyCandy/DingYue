@@ -1,4 +1,10 @@
 import { Subscription } from '../constants';
+import type {
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON,
+  RegistrationResponseJSON,
+  AuthenticationResponseJSON,
+} from '@simplewebauthn/browser';
 
 const normalizeApiBaseUrl = (value: string): string => {
   const trimmed = value.trim();
@@ -145,6 +151,7 @@ export interface SecurityOverview {
   email: string;
   hasPassword: boolean;
   googleLinked: boolean;
+  passkeyCount: number;
   accountCreatedAt: string;
   recommendations: string[];
 }
@@ -153,6 +160,7 @@ export interface AuthUserPayload {
   id: number;
   email: string;
   name: string;
+  avatar: string | null;
 }
 
 export interface AuthSessionPayload {
@@ -160,10 +168,16 @@ export interface AuthSessionPayload {
   user: AuthUserPayload;
 }
 
+export interface LocalizedText {
+  en: string;
+  zh: string;
+}
+
 export interface HelpArticle {
   id: string;
-  title: string;
-  summary: string;
+  title: LocalizedText;
+  summary: LocalizedText;
+  content: { en: string[]; zh: string[] };
 }
 
 const getAuthHeaders = (includeJsonContentType = false): Headers => {
@@ -696,9 +710,88 @@ export const api = {
     return Array.isArray(data)
       ? data.map((item) => ({
           id: String(item.id || ''),
-          title: String(item.title || ''),
-          summary: String(item.summary || ''),
+          title: { en: String(item.title?.en || ''), zh: String(item.title?.zh || '') },
+          summary: { en: String(item.summary?.en || ''), zh: String(item.summary?.zh || '') },
+          content: {
+            en: Array.isArray(item.content?.en) ? item.content.en.map(String) : [],
+            zh: Array.isArray(item.content?.zh) ? item.content.zh.map(String) : [],
+          },
         }))
       : [];
+  },
+
+  async getProfile(): Promise<{ id: number; email: string; name: string; avatar: string | null }> {
+    const response = await fetch(`${API_URL}/users/profile`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  async updateProfile(payload: { name?: string; avatar?: string | null }): Promise<AuthSessionPayload & { avatar: string | null }> {
+    const response = await fetch(`${API_URL}/users/profile`, {
+      method: 'PATCH',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  async deleteAccount(): Promise<void> {
+    const response = await fetch(`${API_URL}/users/account`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({}),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+  },
+
+  async getFxRates(): Promise<{ base: string; rates: Record<string, number>; fetchedAt: number; stale?: boolean }> {
+    const response = await fetch(`${API_URL}/fx/rates`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  async beginPasskeyRegistration(): Promise<PublicKeyCredentialCreationOptionsJSON> {
+    const response = await fetch(`${API_URL}/webauthn/register/options`, {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({}),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  async finishPasskeyRegistration(credential: RegistrationResponseJSON): Promise<{ verified: boolean; passkeyCount: number }> {
+    const response = await fetch(`${API_URL}/webauthn/register/verify`, {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({ credential }),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  async beginPasskeyAuthentication(): Promise<PublicKeyCredentialRequestOptionsJSON> {
+    const response = await fetch(`${API_URL}/webauthn/auth/options`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  async finishPasskeyAuthentication(credential: AuthenticationResponseJSON): Promise<AuthSessionPayload> {
+    const response = await fetch(`${API_URL}/webauthn/auth/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential }),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
   },
 };

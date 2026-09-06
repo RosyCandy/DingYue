@@ -10,7 +10,14 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
 import multer from 'multer';
-import { ProxyAgent, setGlobalDispatcher } from 'undici';
+import nodemailer from 'nodemailer';
+import {
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+  generateAuthenticationOptions,
+  verifyAuthenticationResponse
+} from '@simplewebauthn/server';
+import { Agent, ProxyAgent, setGlobalDispatcher, fetch as undiciFetch } from 'undici';
 
 dotenv.config();
 
@@ -26,6 +33,12 @@ if (proxyUrl) {
   console.log(`Using proxy for outbound requests (e.g. Google API calls): ${proxyUrl}`);
 }
 
+// 上面的全局代理是给 Google 校验用的；微信 / QQ 是国内服务、Apple 也通常可直连，
+// 走境外代理反而可能失败，所以这些出站请求绕过全局代理直连。
+const directDispatcher = new Agent();
+const directFetch = (url: string, init?: Parameters<typeof undiciFetch>[1]) =>
+  undiciFetch(url, { ...init, dispatcher: directDispatcher });
+
 const app = express();
 const port = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-secret-change-me';
@@ -37,6 +50,70 @@ if (process.env.NODE_ENV === 'production' && !GOOGLE_CLIENT_ID) {
   throw new Error('GOOGLE_CLIENT_ID must be set in production');
 }
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+// Apple Sign In：id_token 的 aud 会随平台不同（Web 是 Services ID，iOS 原生是 Bundle ID），
+// 所以用逗号分隔的列表配置所有允许的 audience。未配置时仅校验签名与签发方。
+const APPLE_ALLOWED_AUDIENCES = String(process.env.APPLE_ALLOWED_AUDIENCES || '')
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+const WECHAT_APP_ID = process.env.WECHAT_APP_ID || '';
+const WECHAT_APP_SECRET = process.env.WECHAT_APP_SECRET || '';
+const QQ_APP_ID = process.env.QQ_APP_ID || '';
+const QQ_APP_SECRET = process.env.QQ_APP_SECRET || '';
+
+// 邮件发送：未配置 SMTP 时退化为“开发模式”，验证码只打印到服务端日志，
+// 且仅在非生产环境随响应返回 devCode，方便本地调试。
+const SMTP_HOST = process.env.SMTP_HOST || '';
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || '465', 10);
+const SMTP_USER = process.env.SMTP_USER || '';
+const SMTP_PASS = process.env.SMTP_PASS || '';
+const SMTP_FROM = process.env.SMTP_FROM || SMTP_USER;
+const SMTP_SECURE = SMTP_PORT === 465;
+const smtpConfigured = Boolean(SMTP_HOST && SMTP_USER && SMTP_PASS);
+const mailer = smtpConfigured
+  ? nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      auth: { user: SMTP_USER, pass: SMTP_PASS }
+    })
+  : null;
+if (!smtpConfigured) {
+  console.log('SMTP 未配置，邮箱验证码将以开发模式输出到日志。');
+}
+
+// 通行密钥（Passkey / WebAuthn）：rpID 必须与访问域名一致（本地开发是 localhost），
+// 生产环境请在 .env 设置 PASSKEY_RP_ID=ngaasiu.studio 和 PASSKEY_EXPECTED_ORIGINS。
+const PASSKEY_RP_ID = process.env.PASSKEY_RP_ID || 'localhost';
+const PASSKEY_RP_NAME = process.env.PASSKEY_RP_NAME || 'DuoDuo';
+const PASSKEY_EXPECTED_ORIGINS = (process.env.PASSKEY_EXPECTED_ORIGINS ||
+  `http://localhost:3000,https://${PASSKEY_RP_ID}`)
+  .split(',')
+  .map((value) => value.trim())
+  .filter(Boolean);
+
+// WebAuthn challenge 只需要存活几分钟，单进程部署直接放内存即可
+const passkeyChallenges = new Map<string, { challenge: string; expiresAt: number }>();
+const PASSKEY_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+
+const storePasskeyChallenge = (key: string, challenge: string) => {
+  const now = Date.now();
+  for (const [k, v] of passkeyChallenges) {
+    if (v.expiresAt < now) passkeyChallenges.delete(k);
+  }
+  passkeyChallenges.set(key, { challenge, expiresAt: now + PASSKEY_CHALLENGE_TTL_MS });
+};
+
+const consumePasskeyChallenge = (key: string, challenge: string): boolean => {
+  const record = passkeyChallenges.get(key);
+  if (!record || record.challenge !== challenge || record.expiresAt < Date.now()) {
+    return false;
+  }
+  passkeyChallenges.delete(key);
+  return true;
+};
 
 type AuthTokenPayload = {
   userId: number;
@@ -81,7 +158,8 @@ type CustomCategoryRow = {
   updated_at: string;
 };
 
-const MONTH_LABELS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+// 月份统一用阿拉伯数字显示，与界面语言无关
+const MONTH_LABELS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12'];
 const CATEGORY_COLORS = ['#0054cd', '#4c4aca', '#894d00', '#2e7d32', '#ec4899', '#0ea5e9', '#6366f1', '#16a34a'];
 const UPLOAD_ROOT = path.join(process.cwd(), 'server', 'uploads');
 const ICON_UPLOAD_DIR = path.join(UPLOAD_ROOT, 'icons');
@@ -191,7 +269,7 @@ const authRequired = (req: AuthenticatedRequest, res: Response, next: NextFuncti
   }
 };
 
-const buildAuthResponse = (user: { id: number; email: string; name?: string | null }) => {
+const buildAuthResponse = (user: { id: number; email: string; name?: string | null; avatar?: string | null }) => {
   const token = jwt.sign(
     { userId: user.id, email: user.email, name: user.name || '' },
     JWT_SECRET,
@@ -202,27 +280,40 @@ const buildAuthResponse = (user: { id: number; email: string; name?: string | nu
     user: {
       id: user.id,
       email: user.email,
-      name: user.name || ''
+      name: user.name || '',
+      avatar: user.avatar || null
     }
   };
 };
 
-const buildSecurityOverview = (user: {
+const buildSecurityOverview = async (user: {
+  id?: number;
   email: string;
   password_hash: string | null;
   google_id: string | null;
   created_at: string;
-}) => ({
-  email: user.email,
-  hasPassword: Boolean(user.password_hash),
-  googleLinked: Boolean(user.google_id),
-  accountCreatedAt: user.created_at,
-  recommendations: [
-    'Use a strong password and rotate it periodically.',
-    'Enable app lock if your device is shared.',
-    'Review active subscriptions every month.'
-  ]
-});
+}) => {
+  let passkeyCount = 0;
+  if (user.id) {
+    const [rows]: any = await pool.query(
+      'SELECT COUNT(*) AS count FROM webauthn_credentials WHERE user_id = ?',
+      [user.id]
+    );
+    passkeyCount = Number(rows?.[0]?.count || 0);
+  }
+  return {
+    email: user.email,
+    hasPassword: Boolean(user.password_hash),
+    googleLinked: Boolean(user.google_id),
+    passkeyCount,
+    accountCreatedAt: user.created_at,
+    recommendations: [
+      'Use a strong password and rotate it periodically.',
+      'Enable app lock if your device is shared.',
+      'Review active subscriptions every month.'
+    ]
+  };
+};
 
 const iconStorage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -259,6 +350,10 @@ async function ensureDatabaseSchema() {
       email VARCHAR(255) UNIQUE NOT NULL,
       password_hash VARCHAR(255),
       google_id VARCHAR(255),
+      apple_id VARCHAR(255) UNIQUE,
+      wechat_id VARCHAR(255) UNIQUE,
+      qq_id VARCHAR(255) UNIQUE,
+      avatar VARCHAR(500) NULL,
       name VARCHAR(100),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
@@ -394,6 +489,64 @@ async function ensureDatabaseSchema() {
   await pool.execute(`
     ALTER TABLE user_settings
     MODIFY language ENUM('English', '简体中文', '繁體中文', 'Latin', '한국어') NOT NULL DEFAULT 'English'
+  `);
+
+  // Social login provider columns (Apple / WeChat / QQ) and profile avatar.
+  const [userColumns]: any = await pool.query(
+    `SELECT COLUMN_NAME
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'`
+  );
+  const userColumnNames = new Set(
+    Array.isArray(userColumns)
+      ? userColumns.map((row: { COLUMN_NAME: string }) => row.COLUMN_NAME)
+      : []
+  );
+  for (const column of ['apple_id', 'wechat_id', 'qq_id', 'avatar']) {
+    if (!userColumnNames.has(column)) {
+      await pool.execute(`ALTER TABLE users ADD COLUMN ${column} VARCHAR(255) NULL`);
+    }
+  }
+  for (const indexName of ['uniq_users_apple_id', 'uniq_users_wechat_id', 'uniq_users_qq_id']) {
+    const [existingIndexes]: any = await pool.query(
+      `SHOW INDEX FROM users WHERE Key_name = '${indexName}'`
+    );
+    if (!Array.isArray(existingIndexes) || existingIndexes.length === 0) {
+      await pool.execute(`CREATE UNIQUE INDEX ${indexName} ON users (${indexName.replace('uniq_users_', '')})`);
+    }
+  }
+
+  // Email verification codes for registration and password reset.
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS email_verification_codes (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      email VARCHAR(255) NOT NULL,
+      purpose ENUM('register', 'reset_password') NOT NULL,
+      code_hash VARCHAR(255) NOT NULL,
+      expires_at DATETIME NOT NULL,
+      used_at DATETIME NULL,
+      attempts INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_verification_codes_email_purpose (email, purpose)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
+  // Passkey (WebAuthn) credentials.
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS webauthn_credentials (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      user_id INT NOT NULL,
+      credential_id VARCHAR(512) NOT NULL,
+      credential_public_key TEXT NOT NULL,
+      counter BIGINT NOT NULL DEFAULT 0,
+      transports VARCHAR(255) NULL,
+      device_type VARCHAR(64) NULL,
+      backed_up BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_webauthn_credential_id (credential_id),
+      INDEX idx_webauthn_user_id (user_id),
+      CONSTRAINT fk_webauthn_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
   // Legacy-data safeguard: if the project has only one user, bind old subscriptions with NULL user_id to that user.
@@ -680,24 +833,278 @@ const syncSubscriptionNotifications = async (userId: number) => {
 };
 
 // ─────────────────────────────────────────────
+// Email Verification Codes
+// ─────────────────────────────────────────────
+
+const CODE_PURPOSES = ['register', 'reset_password'] as const;
+type CodePurpose = typeof CODE_PURPOSES[number];
+const CODE_TTL_MINUTES = 10;
+const CODE_MAX_ATTEMPTS = 5;
+const CODE_SEND_COOLDOWN_MS = 60 * 1000;
+const CODE_HOURLY_LIMIT = 5;
+
+// 微信 / QQ / Apple 匿名用户没有真实邮箱，用占位邮箱满足 users.email 的唯一约束。
+// 占位邮箱不能用于收验证码，找回密码接口会显式拒绝。
+const EMAIL_PLACEHOLDER_DOMAINS = ['@wechat.placeholder', '@qq.placeholder', '@apple.placeholder'];
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const normalizeEmail = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+const isPlaceholderEmail = (email: string): boolean =>
+  EMAIL_PLACEHOLDER_DOMAINS.some((domain) => email.endsWith(domain));
+
+const isDeliverableEmail = (email: string): boolean =>
+  EMAIL_PATTERN.test(email) && !isPlaceholderEmail(email);
+
+const createPlaceholderEmail = (prefix: string, providerId: string, domain: string): string => {
+  const digest = crypto.createHash('sha256').update(providerId).digest('hex').slice(0, 20);
+  return `${prefix}_${digest}${domain}`;
+};
+
+const sendVerificationCodeEmail = async (email: string, code: string, purpose: CodePurpose) => {
+  const purposeText = purpose === 'register' ? '注册' : '密码重置';
+  const subject = `【DuoDuo】${purposeText}验证码`;
+  const text = `你的 DuoDuo ${purposeText}验证码是：${code}\n\n验证码 ${CODE_TTL_MINUTES} 分钟内有效。如果不是你本人操作，请忽略这封邮件。`;
+
+  if (!mailer) {
+    console.log(`[dev] ${purposeText}验证码 ${email}: ${code}`);
+    return;
+  }
+  await mailer.sendMail({ from: SMTP_FROM, to: email, subject, text });
+};
+
+const sendVerificationCode = async (email: string, purpose: CodePurpose): Promise<{ devCode?: string }> => {
+  const [recentRows]: any = await pool.query(
+    `SELECT created_at FROM email_verification_codes
+     WHERE email = ? AND purpose = ? AND created_at > DATE_SUB(NOW(), INTERVAL ? SECOND)
+     ORDER BY created_at DESC LIMIT 1`,
+    [email, purpose, CODE_SEND_COOLDOWN_MS / 1000]
+  );
+  if (Array.isArray(recentRows) && recentRows.length > 0) {
+    throw Object.assign(new Error('发送太频繁，请稍后再试'), { status: 429 });
+  }
+
+  const [hourRows]: any = await pool.query(
+    `SELECT COUNT(*) AS count FROM email_verification_codes
+     WHERE email = ? AND purpose = ? AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)`,
+    [email, purpose]
+  );
+  const hourlyCount = Number(hourRows?.[0]?.count || 0);
+  if (hourlyCount >= CODE_HOURLY_LIMIT) {
+    throw Object.assign(new Error('验证码发送次数已达上限，请一小时后再试'), { status: 429 });
+  }
+
+  const code = String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+  const codeHash = await bcrypt.hash(code, 10);
+  await pool.execute(
+    `INSERT INTO email_verification_codes (email, purpose, code_hash, expires_at)
+     VALUES (?, ?, ?, DATE_ADD(NOW(), INTERVAL ? MINUTE))`,
+    [email, purpose, codeHash, CODE_TTL_MINUTES]
+  );
+
+  await sendVerificationCodeEmail(email, code, purpose);
+  if (!mailer && process.env.NODE_ENV !== 'production') {
+    return { devCode: code };
+  }
+  return {};
+};
+
+const consumeVerificationCode = async (email: string, purpose: CodePurpose, code: string) => {
+  if (!/^\d{6}$/.test(code)) {
+    throw Object.assign(new Error('请输入 6 位数字验证码'), { status: 400 });
+  }
+
+  const [rows]: any = await pool.query(
+    `SELECT id, code_hash, expires_at, attempts FROM email_verification_codes
+     WHERE email = ? AND purpose = ? AND used_at IS NULL AND expires_at > NOW()
+     ORDER BY id DESC LIMIT 1`,
+    [email, purpose]
+  );
+  const record = Array.isArray(rows) ? rows[0] : null;
+  if (!record) {
+    throw Object.assign(new Error('验证码已过期，请重新获取'), { status: 400 });
+  }
+  if (Number(record.attempts) >= CODE_MAX_ATTEMPTS) {
+    throw Object.assign(new Error('验证码错误次数过多，请重新获取'), { status: 400 });
+  }
+
+  const matches = await bcrypt.compare(code, record.code_hash);
+  if (!matches) {
+    await pool.execute('UPDATE email_verification_codes SET attempts = attempts + 1 WHERE id = ?', [record.id]);
+    throw Object.assign(new Error('验证码不正确'), { status: 400 });
+  }
+
+  await pool.execute('UPDATE email_verification_codes SET used_at = NOW() WHERE id = ?', [record.id]);
+};
+
+// ─────────────────────────────────────────────
+// Social Login Helpers (Apple / WeChat / QQ)
+// ─────────────────────────────────────────────
+
+const SOCIAL_PROVIDER_COLUMNS = ['apple_id', 'wechat_id', 'qq_id'] as const;
+type SocialProviderColumn = typeof SOCIAL_PROVIDER_COLUMNS[number];
+
+const findOrCreateSocialUser = async ({
+  providerColumn,
+  providerId,
+  email,
+  name,
+  placeholderPrefix,
+  placeholderDomain
+}: {
+  providerColumn: SocialProviderColumn;
+  providerId: string;
+  email: string | null;
+  name: string;
+  placeholderPrefix: string;
+  placeholderDomain: string;
+}) => {
+  const [byProvider]: any = await pool.execute(
+    `SELECT * FROM users WHERE ${providerColumn} = ? LIMIT 1`,
+    [providerId]
+  );
+  if (byProvider?.[0]) return byProvider[0];
+
+  if (email) {
+    // 已有同邮箱账户（例如邮箱注册用户）时直接关联该第三方账号
+    const [byEmail]: any = await pool.execute('SELECT * FROM users WHERE email = ? LIMIT 1', [email]);
+    if (byEmail?.[0]) {
+      await pool.execute(`UPDATE users SET ${providerColumn} = ? WHERE id = ?`, [providerId, byEmail[0].id]);
+      return { ...byEmail[0], [providerColumn]: providerId };
+    }
+  }
+
+  const placeholderEmail = createPlaceholderEmail(placeholderPrefix, providerId, placeholderDomain);
+  const displayName = name || '用户';
+  try {
+    await pool.execute(
+      `INSERT INTO users (email, name, ${providerColumn}) VALUES (?, ?, ?)`,
+      [placeholderEmail, displayName, providerId]
+    );
+  } catch (e: any) {
+    // 并发登录时可能撞唯一索引，重查一次
+    if (e?.code !== 'ER_DUP_ENTRY') throw e;
+  }
+  const [created]: any = await pool.execute(
+    `SELECT * FROM users WHERE ${providerColumn} = ? LIMIT 1`,
+    [providerId]
+  );
+  return created[0];
+};
+
+type AppleJwk = { kid: string; kty: string; n: string; e: string };
+let appleJwksCache: { keys: Map<string, crypto.KeyObject>; fetchedAt: number } | null = null;
+
+const getAppleSigningKeys = async (): Promise<Map<string, crypto.KeyObject>> => {
+  if (appleJwksCache && Date.now() - appleJwksCache.fetchedAt < 24 * 60 * 60 * 1000) {
+    return appleJwksCache.keys;
+  }
+  const res = await directFetch('https://appleid.apple.com/auth/keys');
+  if (!res.ok) throw new Error(`获取 Apple 公钥失败: ${res.status}`);
+  const data: any = await res.json();
+  const keys = new Map<string, crypto.KeyObject>();
+  for (const jwk of (data.keys || []) as AppleJwk[]) {
+    keys.set(jwk.kid, crypto.createPublicKey({ key: jwk as crypto.JsonWebKey, format: 'jwk' }));
+  }
+  if (keys.size === 0) throw new Error('Apple 公钥列表为空');
+  appleJwksCache = { keys, fetchedAt: Date.now() };
+  return keys;
+};
+
+const verifyAppleIdentityToken = async (identityToken: string): Promise<{ sub: string; email: string | null }> => {
+  const decoded = jwt.decode(identityToken, { complete: true });
+  if (!decoded || typeof decoded !== 'object' || !('header' in decoded)) {
+    throw new Error('无效的 Apple 凭证');
+  }
+  const kid = (decoded as any).header?.kid;
+  const keys = await getAppleSigningKeys();
+  const key = kid ? keys.get(kid) : undefined;
+  if (!key) throw new Error('找不到匹配的 Apple 公钥');
+
+  const verifyOptions: jwt.VerifyOptions = {
+    algorithms: ['RS256'],
+    issuer: 'https://appleid.apple.com'
+  };
+  if (APPLE_ALLOWED_AUDIENCES.length > 0) {
+    // @types/jsonwebtoken 把多 audience 定义成了 tuple，这里列表长度运行时才确定
+    verifyOptions.audience = APPLE_ALLOWED_AUDIENCES as [string, ...string[]];
+  }
+  const payload = jwt.verify(identityToken, key, verifyOptions) as jwt.JwtPayload;
+  if (!payload?.sub) throw new Error('Apple 凭证缺少用户标识');
+  return { sub: payload.sub, email: (payload.email as string) || null };
+};
+
+// ─────────────────────────────────────────────
 // Auth Routes
 // ─────────────────────────────────────────────
 
+// POST /api/auth/send-code — 注册 / 找回密码的邮箱验证码
+app.post('/api/auth/send-code', async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const purpose = String(req.body?.purpose || '') as CodePurpose;
+  if (!CODE_PURPOSES.includes(purpose)) {
+    return res.status(400).json({ error: '无效的验证码用途' });
+  }
+  if (!isDeliverableEmail(email)) {
+    return res.status(400).json({ error: '请输入有效的邮箱地址' });
+  }
+  try {
+    if (purpose === 'register') {
+      const [rows]: any = await pool.execute('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+      if (Array.isArray(rows) && rows.length > 0) {
+        return res.status(400).json({ error: '该邮箱已注册，请直接登录' });
+      }
+    } else {
+      const [rows]: any = await pool.execute('SELECT id, password_hash, google_id, apple_id, wechat_id, qq_id FROM users WHERE email = ? LIMIT 1', [email]);
+      const user = rows?.[0];
+      if (!user) {
+        return res.status(400).json({ error: '该邮箱未注册' });
+      }
+      if (isPlaceholderEmail(email)) {
+        return res.status(400).json({ error: '第三方登录账户没有真实邮箱，请使用对应方式登录，或先在设置中绑定邮箱' });
+      }
+    }
+
+    const { devCode } = await sendVerificationCode(email, purpose);
+    res.json({ success: true, ...(devCode ? { devCode } : {}) });
+  } catch (e: any) {
+    const status = typeof e?.status === 'number' ? e.status : 500;
+    if (status === 500) console.error('Send code error:', e);
+    res.status(status).json({ error: e.message || '验证码发送失败' });
+  }
+});
+
 // POST /api/auth/register
 app.post('/api/auth/register', async (req, res) => {
-  const { email, password, name } = req.body;
+  const email = normalizeEmail(req.body?.email);
+  const { password, name, code } = req.body;
   if (!email || !password || !name) {
     return res.status(400).json({ error: '请填写所有必填字段' });
   }
+  if (!isDeliverableEmail(email)) {
+    return res.status(400).json({ error: '请输入有效的邮箱地址' });
+  }
+  if (typeof password !== 'string' || password.length < 6) {
+    return res.status(400).json({ error: '密码至少需要 6 位' });
+  }
+  if (!code) {
+    return res.status(400).json({ error: '请输入邮箱验证码' });
+  }
   try {
+    await consumeVerificationCode(email, 'register', String(code));
     const hashed = await bcrypt.hash(password, 10);
     await pool.execute(
         'INSERT INTO users (email, password_hash, name) VALUES (?, ?, ?)',
         [email, hashed, name]
     );
-    res.json({ success: true });
+    const [rows]: any = await pool.execute('SELECT * FROM users WHERE email = ? LIMIT 1', [email]);
+    // 注册即登录：邮箱已通过验证码验证
+    res.json(buildAuthResponse(rows[0]));
   } catch (e: any) {
-    console.error('Register error:', e); // ← 打印完整错误
+    if (typeof e?.status === 'number') {
+      return res.status(e.status).json({ error: e.message });
+    }
+    console.error('Register error:', e);
     if (e.code === 'ER_DUP_ENTRY') {
       return res.status(400).json({ error: '邮箱已注册' });
     }
@@ -714,7 +1121,8 @@ app.post('/api/auth/register', async (req, res) => {
 
 // POST /api/auth/login
 app.post('/api/auth/login', async (req, res) => {
-  const { email, password } = req.body;
+  const email = normalizeEmail(req.body?.email);
+  const { password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: '请填写邮箱和密码' });
   }
@@ -727,6 +1135,38 @@ app.post('/api/auth/login', async (req, res) => {
     res.json(buildAuthResponse(user));
   } catch (e: any) {
     res.status(500).json({ error: '登录失败: ' + e.message });
+  }
+});
+
+// POST /api/auth/reset-password — 忘记密码时通过邮箱验证码重置
+app.post('/api/auth/reset-password', async (req, res) => {
+  const email = normalizeEmail(req.body?.email);
+  const { code, newPassword } = req.body;
+  if (!email || !code || !newPassword) {
+    return res.status(400).json({ error: '请填写所有必填字段' });
+  }
+  if (typeof newPassword !== 'string' || newPassword.length < 6) {
+    return res.status(400).json({ error: '新密码至少需要 6 位' });
+  }
+  if (isPlaceholderEmail(email)) {
+    return res.status(400).json({ error: '第三方登录账户不支持邮箱找回，请使用对应方式登录' });
+  }
+  try {
+    await consumeVerificationCode(email, 'reset_password', String(code));
+    const [rows]: any = await pool.execute('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
+    const user = rows?.[0];
+    if (!user) {
+      return res.status(400).json({ error: '该邮箱未注册' });
+    }
+    const hashed = await bcrypt.hash(newPassword, 10);
+    await pool.execute('UPDATE users SET password_hash = ? WHERE id = ?', [hashed, user.id]);
+    res.json({ success: true });
+  } catch (e: any) {
+    if (typeof e?.status === 'number') {
+      return res.status(e.status).json({ error: e.message });
+    }
+    console.error('Reset password error:', e);
+    res.status(500).json({ error: '密码重置失败: ' + e.message });
   }
 });
 
@@ -766,6 +1206,142 @@ app.post('/api/auth/google', async (req, res) => {
     res.json(buildAuthResponse(user));
   } catch (e: any) {
     res.status(400).json({ error: 'Google 登录失败: ' + e.message });
+  }
+});
+
+// POST /api/auth/apple — 前端（iOS 原生 SDK / Web JS SDK）拿到 identityToken 后提交
+app.post('/api/auth/apple', async (req, res) => {
+  const { identityToken, name } = req.body;
+  if (!identityToken) {
+    return res.status(400).json({ error: '缺少 Apple 凭证' });
+  }
+  try {
+    const { sub, email } = await verifyAppleIdentityToken(identityToken);
+    const displayName = typeof name === 'string' && name.trim() ? name.trim() : '';
+    const user = await findOrCreateSocialUser({
+      providerColumn: 'apple_id',
+      providerId: sub,
+      email,
+      name: displayName,
+      placeholderPrefix: 'apple',
+      placeholderDomain: '@apple.placeholder'
+    });
+    if (!user) {
+      return res.status(400).json({ error: 'Apple 登录失败: 无法创建或匹配用户' });
+    }
+    res.json(buildAuthResponse(user));
+  } catch (e: any) {
+    if (process.env.NODE_ENV !== 'production') console.error('Apple login error:', e);
+    res.status(400).json({ error: 'Apple 登录失败: ' + e.message });
+  }
+});
+
+// POST /api/auth/wechat — 网站应用扫码登录后回传 code
+app.post('/api/auth/wechat', async (req, res) => {
+  const { code } = req.body;
+  if (!code) {
+    return res.status(400).json({ error: '缺少微信登录 code' });
+  }
+  if (!WECHAT_APP_ID || !WECHAT_APP_SECRET) {
+    return res.status(501).json({ error: '微信登录暂未配置，请联系管理员' });
+  }
+  try {
+    const tokenRes = await directFetch(
+      `https://api.weixin.qq.com/sns/oauth2/access_token?appid=${encodeURIComponent(WECHAT_APP_ID)}&secret=${encodeURIComponent(WECHAT_APP_SECRET)}&code=${encodeURIComponent(String(code))}&grant_type=authorization_code`
+    );
+    const tokenData: any = await tokenRes.json();
+    if (!tokenData.openid) {
+      return res.status(400).json({ error: '微信登录失败: ' + (tokenData.errmsg || '无效 code') });
+    }
+
+    // 优先使用 unionid（同一开放平台主体下稳定），否则退回 openid
+    const providerId = String(tokenData.unionid || tokenData.openid);
+    let nickname = '';
+    try {
+      const userRes = await directFetch(
+        `https://api.weixin.qq.com/sns/userinfo?access_token=${encodeURIComponent(tokenData.access_token)}&openid=${encodeURIComponent(String(tokenData.openid))}`
+      );
+      const userData: any = await userRes.json();
+      if (typeof userData?.nickname === 'string') nickname = userData.nickname;
+    } catch {
+      // 拿不到昵称不影响登录
+    }
+
+    const user = await findOrCreateSocialUser({
+      providerColumn: 'wechat_id',
+      providerId,
+      email: null,
+      name: nickname || '微信用户',
+      placeholderPrefix: 'wx',
+      placeholderDomain: '@wechat.placeholder'
+    });
+    if (!user) {
+      return res.status(400).json({ error: '微信登录失败: 无法创建或匹配用户' });
+    }
+    res.json(buildAuthResponse(user));
+  } catch (e: any) {
+    if (process.env.NODE_ENV !== 'production') console.error('WeChat login error:', e);
+    res.status(400).json({ error: '微信登录失败: ' + e.message });
+  }
+});
+
+// POST /api/auth/qq — QQ 互联 OAuth 登录后回传 code
+app.post('/api/auth/qq', async (req, res) => {
+  const { code, redirectUri } = req.body;
+  if (!code) {
+    return res.status(400).json({ error: '缺少 QQ 登录 code' });
+  }
+  if (!QQ_APP_ID || !QQ_APP_SECRET) {
+    return res.status(501).json({ error: 'QQ 登录暂未配置，请联系管理员' });
+  }
+  try {
+    const tokenRes = await directFetch(
+      `https://graph.qq.com/oauth2.0/token?grant_type=authorization_code&client_id=${encodeURIComponent(QQ_APP_ID)}&client_secret=${encodeURIComponent(QQ_APP_SECRET)}&code=${encodeURIComponent(String(code))}&redirect_uri=${encodeURIComponent(String(redirectUri || ''))}&fmt=json`
+    );
+    const tokenData: any = await tokenRes.json();
+    if (!tokenData.access_token) {
+      return res.status(400).json({ error: 'QQ 登录失败: ' + (tokenData.error_description || tokenData.msg || '无效 code') });
+    }
+
+    let openid = tokenData.openid;
+    if (!openid) {
+      const meRes = await directFetch(
+        `https://graph.qq.com/oauth2.0/me?access_token=${encodeURIComponent(tokenData.access_token)}&fmt=json`
+      );
+      const meText = await meRes.text();
+      const meData = JSON.parse(meText.replace(/^callback\(|\);$/g, '').trim());
+      if (!meData?.openid) {
+        return res.status(400).json({ error: 'QQ 登录失败: 获取 openid 失败' });
+      }
+      openid = meData.openid;
+    }
+
+    let nickname = '';
+    try {
+      const userRes = await directFetch(
+        `https://graph.qq.com/user/get_user_info?access_token=${encodeURIComponent(tokenData.access_token)}&oauth_consumer_key=${encodeURIComponent(QQ_APP_ID)}&openid=${encodeURIComponent(String(openid))}`
+      );
+      const userData: any = await userRes.json();
+      if (typeof userData?.nickname === 'string') nickname = userData.nickname;
+    } catch {
+      // 拿不到昵称不影响登录
+    }
+
+    const user = await findOrCreateSocialUser({
+      providerColumn: 'qq_id',
+      providerId: String(openid),
+      email: null,
+      name: nickname || 'QQ用户',
+      placeholderPrefix: 'qq',
+      placeholderDomain: '@qq.placeholder'
+    });
+    if (!user) {
+      return res.status(400).json({ error: 'QQ 登录失败: 无法创建或匹配用户' });
+    }
+    res.json(buildAuthResponse(user));
+  } catch (e: any) {
+    if (process.env.NODE_ENV !== 'production') console.error('QQ login error:', e);
+    res.status(400).json({ error: 'QQ 登录失败: ' + e.message });
   }
 });
 
@@ -1450,7 +2026,7 @@ app.get('/api/security/overview', authRequired, async (req: AuthenticatedRequest
       return res.status(404).json({ error: 'User not found' });
     }
 
-    res.json(buildSecurityOverview(user));
+    res.json(await buildSecurityOverview(user));
   } catch (error: any) {
     console.error('Error fetching security overview:', error);
     res.status(500).json({ error: error.message });
@@ -1478,7 +2054,7 @@ app.patch('/api/security/email', authRequired, async (req: AuthenticatedRequest,
     await pool.execute('UPDATE users SET email = ? WHERE id = ?', [nextEmail, userId]);
 
     const [rows]: any = await pool.query(
-      'SELECT id, email, name FROM users WHERE id = ? LIMIT 1',
+      'SELECT id, email, name, avatar FROM users WHERE id = ? LIMIT 1',
       [userId]
     );
     const user = rows?.[0];
@@ -1526,7 +2102,7 @@ app.post('/api/security/password', authRequired, async (req: AuthenticatedReques
       'SELECT id, email, password_hash, google_id, created_at FROM users WHERE id = ? LIMIT 1',
       [userId]
     );
-    res.json(buildSecurityOverview(updatedRows[0]));
+    res.json(await buildSecurityOverview(updatedRows[0]));
   } catch (error: any) {
     console.error('Error setting password:', error);
     res.status(500).json({ error: error.message });
@@ -1547,7 +2123,7 @@ app.post('/api/security/unlink-google', authRequired, async (req: AuthenticatedR
     }
 
     if (!user.google_id) {
-      return res.json(buildSecurityOverview(user));
+      return res.json(await buildSecurityOverview(user));
     }
 
     if (!user.password_hash) {
@@ -1561,29 +2137,307 @@ app.post('/api/security/unlink-google', authRequired, async (req: AuthenticatedR
       [userId]
     );
 
-    res.json(buildSecurityOverview(updatedRows[0]));
+    res.json(await buildSecurityOverview(updatedRows[0]));
   } catch (error: any) {
     console.error('Error unlinking google account:', error);
     res.status(500).json({ error: error.message });
   }
 });
 
+// GET /api/users/profile — 当前用户资料
+app.get('/api/users/profile', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const [rows]: any = await pool.query('SELECT id, email, name, avatar FROM users WHERE id = ? LIMIT 1', [userId]);
+    const user = rows?.[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ id: user.id, email: user.email, name: user.name || '', avatar: user.avatar || null });
+  } catch (error: any) {
+    console.error('Error fetching profile:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PATCH /api/users/profile — 更新昵称 / 头像
+app.patch('/api/users/profile', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+
+    const [rows]: any = await pool.query('SELECT id, email, name, avatar FROM users WHERE id = ? LIMIT 1', [userId]);
+    const user = rows?.[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    if (req.body?.name !== undefined) {
+      const name = String(req.body.name).trim();
+      if (!name) {
+        return res.status(400).json({ error: '昵称不能为空' });
+      }
+      if (name.length > 100) {
+        return res.status(400).json({ error: '昵称过长（最多 100 字）' });
+      }
+      updates.push('name = ?');
+      values.push(name);
+    }
+
+    if (req.body?.avatar !== undefined) {
+      const avatar = req.body.avatar === null ? null : String(req.body.avatar).trim();
+      if (avatar && !/^(\/api\/uploads\/|https?:\/\/)/.test(avatar)) {
+        return res.status(400).json({ error: '无效的头像地址' });
+      }
+      updates.push('avatar = ?');
+      values.push(avatar || null);
+    }
+
+    if (updates.length > 0) {
+      values.push(userId);
+      await pool.execute(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`, values);
+    }
+
+    const [updatedRows]: any = await pool.query('SELECT id, email, name, avatar FROM users WHERE id = ? LIMIT 1', [userId]);
+    const updated = updatedRows[0];
+    // 名称会写进 JWT payload，重新签发保持一致
+    res.json({ ...buildAuthResponse(updated), avatar: updated.avatar || null });
+  } catch (error: any) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/users/account — 注销账号（订阅、会员、设置等数据级联删除）
+app.delete('/api/users/account', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const [result]: any = await pool.execute('DELETE FROM users WHERE id = ?', [userId]);
+    if (!result.affectedRows) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({ success: true });
+  } catch (error: any) {
+    console.error('Error deleting account:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// Passkey (WebAuthn) Routes
+// ─────────────────────────────────────────────
+
+// POST /api/webauthn/register/options — 登录状态下开始注册通行密钥
+app.post('/api/webauthn/register/options', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const [rows]: any = await pool.query(
+      'SELECT credential_id, transports FROM webauthn_credentials WHERE user_id = ?',
+      [userId]
+    );
+    const options = await generateRegistrationOptions({
+      rpName: PASSKEY_RP_NAME,
+      rpID: PASSKEY_RP_ID,
+      userName: req.user!.email,
+      userDisplayName: req.user!.name || req.user!.email,
+      excludeCredentials: rows.map((row: any) => ({
+        id: row.credential_id,
+        transports: row.transports ? String(row.transports).split(',') : undefined
+      }))
+    });
+    storePasskeyChallenge(`reg:${userId}`, options.challenge);
+    res.json(options);
+  } catch (error: any) {
+    console.error('WebAuthn register options error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/webauthn/register/verify — 校验并保存新通行密钥
+app.post('/api/webauthn/register/verify', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const verification = await verifyRegistrationResponse({
+      response: req.body?.credential,
+      expectedChallenge: (challenge) => consumePasskeyChallenge(`reg:${userId}`, challenge),
+      expectedOrigin: PASSKEY_EXPECTED_ORIGINS,
+      expectedRPID: PASSKEY_RP_ID
+    });
+    if (!verification.verified || !verification.registrationInfo) {
+      return res.status(400).json({ error: '通行密钥验证失败' });
+    }
+    const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
+    await pool.execute(
+      `INSERT INTO webauthn_credentials
+         (user_id, credential_id, credential_public_key, counter, transports, device_type, backed_up)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE counter = VALUES(counter), user_id = VALUES(user_id)`,
+      [
+        userId,
+        credential.id,
+        Buffer.from(credential.publicKey).toString('base64url'),
+        credential.counter,
+        (credential.transports || []).join(','),
+        credentialDeviceType,
+        credentialBackedUp
+      ]
+    );
+    const [countRows]: any = await pool.query(
+      'SELECT COUNT(*) AS count FROM webauthn_credentials WHERE user_id = ?',
+      [userId]
+    );
+    res.json({ verified: true, passkeyCount: Number(countRows?.[0]?.count || 0) });
+  } catch (error: any) {
+    console.error('WebAuthn register verify error:', error);
+    res.status(400).json({ error: '通行密钥注册失败: ' + error.message });
+  }
+});
+
+// POST /api/webauthn/auth/options — 无需登录，生成登录挑战（可发现凭据，无需输入邮箱）
+app.post('/api/webauthn/auth/options', async (_req, res) => {
+  try {
+    const options = await generateAuthenticationOptions({
+      rpID: PASSKEY_RP_ID,
+      userVerification: 'preferred'
+    });
+    storePasskeyChallenge(`auth:${options.challenge}`, options.challenge);
+    res.json(options);
+  } catch (error: any) {
+    console.error('WebAuthn auth options error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/webauthn/auth/verify — 校验通行密钥并签发登录 token
+app.post('/api/webauthn/auth/verify', async (req, res) => {
+  try {
+    const credential = req.body?.credential;
+    if (!credential?.id) {
+      return res.status(400).json({ error: '缺少通行密钥凭证' });
+    }
+    const [rows]: any = await pool.query(
+      `SELECT wc.*, u.email AS user_email, u.name AS user_name
+       FROM webauthn_credentials wc JOIN users u ON u.id = wc.user_id
+       WHERE wc.credential_id = ? LIMIT 1`,
+      [String(credential.id)]
+    );
+    const stored = rows?.[0];
+    if (!stored) {
+      return res.status(400).json({ error: '该通行密钥未绑定本站账户' });
+    }
+    const verification = await verifyAuthenticationResponse({
+      response: credential,
+      expectedChallenge: (challenge) => consumePasskeyChallenge(`auth:${challenge}`, challenge),
+      expectedOrigin: PASSKEY_EXPECTED_ORIGINS,
+      expectedRPID: PASSKEY_RP_ID,
+      credential: {
+        id: stored.credential_id,
+        publicKey: new Uint8Array(Buffer.from(stored.credential_public_key, 'base64url')),
+        counter: Number(stored.counter),
+        transports: stored.transports ? String(stored.transports).split(',') : undefined
+      }
+    });
+    if (!verification.verified) {
+      return res.status(400).json({ error: '通行密钥验证失败' });
+    }
+    await pool.execute(
+      'UPDATE webauthn_credentials SET counter = ? WHERE id = ?',
+      [verification.authenticationInfo.newCounter, stored.id]
+    );
+    const [userRows]: any = await pool.query('SELECT * FROM users WHERE id = ? LIMIT 1', [stored.user_id]);
+    res.json(buildAuthResponse(userRows[0]));
+  } catch (error: any) {
+    console.error('WebAuthn auth verify error:', error);
+    res.status(400).json({ error: '通行密钥登录失败: ' + error.message });
+  }
+});
+
+// GET /api/fx/rates — 以 USD 为基准的实时汇率（缓存 6 小时，失败时回退到最近一次缓存）
+let fxRatesCache: { rates: Record<string, number>; fetchedAt: number } | null = null;
+
+app.get('/api/fx/rates', authRequired, async (_req: AuthenticatedRequest, res) => {
+  if (fxRatesCache && Date.now() - fxRatesCache.fetchedAt < 6 * 60 * 60 * 1000) {
+    return res.json({ base: 'USD', rates: fxRatesCache.rates, fetchedAt: fxRatesCache.fetchedAt });
+  }
+  try {
+    const upstream = await directFetch('https://open.er-api.com/v6/latest/USD');
+    const data: any = await upstream.json();
+    if (data?.result !== 'success' || !data?.rates || typeof data.rates !== 'object') {
+      throw new Error('invalid fx response');
+    }
+    fxRatesCache = { rates: data.rates, fetchedAt: Date.now() };
+    res.json({ base: 'USD', rates: fxRatesCache.rates, fetchedAt: fxRatesCache.fetchedAt });
+  } catch (error: any) {
+    if (fxRatesCache) {
+      // 上游临时失败时返回略旧的缓存，好过中断界面
+      return res.json({ base: 'USD', rates: fxRatesCache.rates, fetchedAt: fxRatesCache.fetchedAt, stale: true });
+    }
+    if (process.env.NODE_ENV !== 'production') console.error('FX rates error:', error);
+    res.status(502).json({ error: '获取实时汇率失败，请稍后重试' });
+  }
+});
+
 app.get('/api/help/articles', authRequired, async (_req: AuthenticatedRequest, res) => {
+  // 正文同时提供中英文，前端按用户语言选择显示
   res.json([
     {
       id: 'billing-reminders',
-      title: 'How billing reminders work',
-      summary: 'Learn how upcoming renewals are detected and notified.'
+      title: { en: 'How billing reminders work', zh: '账单提醒是如何工作的' },
+      summary: { en: 'Learn how upcoming renewals are detected and notified.', zh: '了解系统如何检测即将到来的续费并发送通知。' },
+      content: {
+        en: [
+          'DuoDuo checks the next billing date of every subscription every day.',
+          'When a renewal is within 3 days, a billing_due notification appears in the Message Center and the subscription is marked as "urgent" on the dashboard.',
+          'Free trials generate a trial_ending notification 3 days before the trial finishes, so you can cancel before being charged.',
+          'Tip: keep the next billing date accurate when adding or editing a subscription — reminders are calculated from it.'
+        ],
+        zh: [
+          'DuoDuo 每天都会检查每个订阅的下次扣费日期。',
+          '当距离续费不足 3 天时，消息中心会出现账单提醒，仪表盘上该订阅会被标记为“即将到期”。',
+          '免费试用会在结束前 3 天生成“试用即将结束”提醒，方便你在扣费前取消。',
+          '小贴士：添加或编辑订阅时请保持下次扣费日期准确，所有提醒都基于这个日期计算。'
+        ]
+      }
     },
     {
       id: 'manage-membership',
-      title: 'Manage membership and restore purchases',
-      summary: 'Steps to cancel auto-renew or restore previous purchases.'
+      title: { en: 'Manage membership and restore purchases', zh: '管理会员与恢复购买' },
+      summary: { en: 'Steps to cancel auto-renew or restore previous purchases.', zh: '如何取消自动续费或恢复已购买的会员。' },
+      content: {
+        en: [
+          'Open Settings → the membership banner → Manage to view your current plan and expiry date.',
+          'Cancel auto-renew: tap "Cancel auto-renew" in the membership page. Your benefits remain valid until the expiry date.',
+          'Restore purchases: if you reinstalled the app or switched devices, tap "Restore purchases" on the membership page while logged in with the same account.',
+          'Upgrading plans takes effect immediately; the unused value of the old plan is not refunded pro-rated.'
+        ],
+        zh: [
+          '打开「设置」→ 顶部会员卡片 →「管理会员」，可以查看当前套餐和到期时间。',
+          '取消自动续费：在会员页面点击「取消自动续费」，会员权益会保留到当前到期日。',
+          '恢复购买：重新安装应用或更换设备后，登录同一账户，在会员页面点击「恢复购买」即可找回会员状态。',
+          '升级套餐立即生效；旧套餐未使用部分不支持按比例退款。'
+        ]
+      }
     },
     {
       id: 'payment-methods',
-      title: 'Manage payment methods',
-      summary: 'Add, remove, and set a default payment method in Wallet.'
+      title: { en: 'Manage payment methods', zh: '管理支付方式' },
+      summary: { en: 'Add, remove, and set a default payment method in Wallet.', zh: '在钱包中添加、删除支付方式或设置默认支付方式。' },
+      content: {
+        en: [
+          'Tap the wallet icon in the top-right corner of the home screen to open Wallet.',
+          'Add a payment method: choose a label (e.g. "Visa ending 4242") and a type such as Apple Pay or credit card.',
+          'Long-press or tap the ⋯ menu on a card to edit, set as default, or delete it. The default method is suggested first when activating a membership.',
+          'Payment methods are for bookkeeping only — DuoDuo never stores card numbers or charges them.'
+        ],
+        zh: [
+          '在首页右上角点击钱包图标，打开「支付方式」管理。',
+          '添加支付方式：填写名称（例如“尾号 4242 的 Visa”）并选择类型（Apple Pay、信用卡等）。',
+          '点击卡片上的菜单可以编辑、设为默认或删除；开通会员时会优先推荐默认支付方式。',
+          '支付方式仅用于记账备注——DuoDuo 不会存储卡号，也不会产生任何扣款。'
+        ]
+      }
     }
   ]);
 });

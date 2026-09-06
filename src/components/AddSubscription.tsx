@@ -3,6 +3,7 @@ import { X, PlusCircle, CloudUpload, ChevronRight, Share2, Calendar, Clock, Arro
 import { motion, AnimatePresence } from 'motion/react';
 import IconSelection from './IconSelection';
 import { useI18n } from '../lib/i18n';
+import { useBackHandler } from '../lib/backButton';
 import { api } from '../lib/api';
 import { Subscription } from '../constants';
 
@@ -14,6 +15,7 @@ interface AddSubscriptionProps {
 
 export default function AddSubscription({ onClose, onSuccess, initialData }: AddSubscriptionProps) {
   const [step, setStep] = useState(1);
+  useBackHandler(() => { if (step > 1) setStep(step - 1); else onClose(); });
   const [loading, setLoading] = useState(false);
   const { t } = useI18n();
 

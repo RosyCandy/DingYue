@@ -4,7 +4,10 @@ import { X, CreditCard, Plus, Smartphone, Trash2, CheckCircle2, Loader2 } from '
 import { useI18n } from '../lib/i18n';
 import { api, PaymentMethod, PaymentMethodInput } from '../lib/api';
 
+import { useBackHandler } from '../lib/backButton';
+
 export default function WalletModal({ onClose }: { onClose: () => void }) {
+  useBackHandler(onClose);
   const { t } = useI18n();
   const [methods, setMethods] = useState<PaymentMethod[]>([]);
   const [loading, setLoading] = useState(true);

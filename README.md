@@ -79,6 +79,24 @@
 ## 🚀 启动项目
 你只需要运行命令：`npm run dev`，前端将开启网页并在本地展示，后端会在控制台提示数据库连通成功并默默支持前后数据的交互！
 
+## 🔐 登录方式说明
+
+应用支持多种登录方式，全部通过环境变量开关，未配置的登录方式会自动在登录页隐藏：
+
+| 登录方式 | 需要的配置 | 说明 |
+| --- | --- | --- |
+| 邮箱密码（默认） | SMTP 配置（生产环境必须） | 注册需邮箱验证码；支持“忘记密码”邮箱找回 |
+| 通行密钥（Passkey） | `PASSKEY_RP_ID` / `PASSKEY_EXPECTED_ORIGINS` | WebAuthn 免密登录，本地开发默认 localhost 即可用 |
+| Google | `VITE_GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_ID` | Web 用 Google Identity，iOS/Android 用原生 SDK |
+| Apple | `VITE_APPLE_CLIENT_ID` / `APPLE_ALLOWED_AUDIENCES` | iOS 原生 AuthenticationServices；Web/Android 用 Apple JS（Services ID） |
+| 微信 | `WECHAT_APP_ID` + `VITE_WECHAT_APP_ID` 等 | 微信开放平台“网站应用”扫码登录，仅 Web 端 |
+| QQ | `QQ_APP_ID` + `VITE_QQ_APP_ID` 等 | QQ 互联扫码登录，仅 Web 端 |
+
+* **邮箱验证码**：`POST /api/auth/send-code`（`purpose` 为 `register` / `reset_password`），60 秒冷却 + 每小时 5 次限流，验证码 10 分钟有效。
+* **开发模式**：未配置 SMTP 时验证码只打印到后端日志，且仅在 `NODE_ENV != production` 时随响应返回 `devCode`（前端自动填入），方便本地调试。
+* **微信 / QQ 登录的用户**没有真实邮箱，系统会生成占位邮箱（`wx_xxx@wechat.placeholder`）；这类账户需先在设置里绑定真实邮箱后才能使用邮箱找回密码。
+* **iOS 打包**：工程已启用 Sign in with Apple 能力（`ios/App/App/App.entitlements`），在 Xcode 中选择你的开发者团队即可；注意 App Store 规则——提供第三方登录就必须提供 Apple 登录。
+
 ## 🌐 服务器部署时的 API 地址配置
 
 前端会读取环境变量 `VITE_API_BASE_URL` 作为 API 根地址：

@@ -7,7 +7,10 @@ import { cn } from '../lib/utils';
 import AddSubscription from './AddSubscription';
 import { api, NotificationItem } from '../lib/api';
 
+import { useBackHandler } from '../lib/backButton';
+
 export default function NotificationCenter({ onClose }: { onClose: () => void }) {
+  useBackHandler(onClose);
   const { t } = useI18n();
   const [editingSub, setEditingSub] = useState<any | null>(null);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
