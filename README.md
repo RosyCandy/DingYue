@@ -1,8 +1,8 @@
-# DuoDuo 订阅管理系统
+# DingYue 订阅管理系统
 
 这是一个前后端一体化的现代 Web 全栈应用，主要用于帮助用户追踪、管理及统计他们各项在线订阅服务（如 Netflix、Spotify 等）的续费计划和开销情况。
 
-## 💡 技术栈概览 
+## 技术栈概览 
 * **前端框架:** React 19 + TypeScript + Vite
 * **样式框架:** Tailwind CSS v4
 * **UI 与图表:** Framer Motion (动画) + Recharts (数据可视化表) + Lucide React (图标)
@@ -11,7 +11,7 @@
 
 ---
 
-## 📂 项目文件全指北 (File-by-File Breakdown)
+## 项目文件全指北 (File-by-File Breakdown)
 
 以下是本项目中**每一个**代码、配置文件及其具体作用的清单：
 
@@ -76,125 +76,6 @@
 
 ---
 
-## 🚀 启动项目
+## 启动项目
 你只需要运行命令：`npm run dev`，前端将开启网页并在本地展示，后端会在控制台提示数据库连通成功并默默支持前后数据的交互！
 
-## 🔐 登录方式说明
-
-应用支持多种登录方式，全部通过环境变量开关，未配置的登录方式会自动在登录页隐藏：
-
-| 登录方式 | 需要的配置 | 说明 |
-| --- | --- | --- |
-| 邮箱密码（默认） | SMTP 配置（生产环境必须） | 注册需邮箱验证码；支持“忘记密码”邮箱找回 |
-| 通行密钥（Passkey） | `PASSKEY_RP_ID` / `PASSKEY_EXPECTED_ORIGINS` | WebAuthn 免密登录，本地开发默认 localhost 即可用 |
-| Google | `VITE_GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_ID` | Web 用 Google Identity，iOS/Android 用原生 SDK |
-| Apple | `VITE_APPLE_CLIENT_ID` / `APPLE_ALLOWED_AUDIENCES` | iOS 原生 AuthenticationServices；Web/Android 用 Apple JS（Services ID） |
-| 微信 | `WECHAT_APP_ID` + `VITE_WECHAT_APP_ID` 等 | 微信开放平台“网站应用”扫码登录，仅 Web 端 |
-| QQ | `QQ_APP_ID` + `VITE_QQ_APP_ID` 等 | QQ 互联扫码登录，仅 Web 端 |
-
-* **邮箱验证码**：`POST /api/auth/send-code`（`purpose` 为 `register` / `reset_password`），60 秒冷却 + 每小时 5 次限流，验证码 10 分钟有效。
-* **开发模式**：未配置 SMTP 时验证码只打印到后端日志，且仅在 `NODE_ENV != production` 时随响应返回 `devCode`（前端自动填入），方便本地调试。
-* **微信 / QQ 登录的用户**没有真实邮箱，系统会生成占位邮箱（`wx_xxx@wechat.placeholder`）；这类账户需先在设置里绑定真实邮箱后才能使用邮箱找回密码。
-* **iOS 打包**：工程已启用 Sign in with Apple 能力（`ios/App/App/App.entitlements`），在 Xcode 中选择你的开发者团队即可；注意 App Store 规则——提供第三方登录就必须提供 Apple 登录。
-
-## 🌐 服务器部署时的 API 地址配置
-
-前端会读取环境变量 `VITE_API_BASE_URL` 作为 API 根地址：
-
-* 本地开发：建议保持 `VITE_API_BASE_URL="/api"`（使用 Vite 代理转发到本地后端）。
-* 服务器网页：设置为 `VITE_API_BASE_URL="/api"`，由 Nginx 转发到 Node.js 的 `3001` 端口。
-* 移动端打包：设置为公网 API 地址，例如 `VITE_API_BASE_URL="https://ngaasiu.studio/api"`。
-
-这样打包后的 iPhone App 也能直接访问你的服务器后端，不依赖本机 `localhost`。
-
-### 生产部署注意事项
-
-前端环境变量是在 `npm run build` 时写入静态文件的，不能只在 Node 进程启动时设置。生产构建前必须设置以下变量：
-
-```bash
-export VITE_GOOGLE_CLIENT_ID="你的 Google Web client ID"
-export VITE_API_BASE_URL="/api"
-npm run build
-```
-
-后端进程还必须设置相同的 `GOOGLE_CLIENT_ID`、数据库变量、`JWT_SECRET` 和 `NODE_ENV=production`。如果缺少 Google client ID，构建或启动会直接报错，不会再生成表面可打开但无法登录的页面。
-
-生产构建时不要设置 `CAPACITOR_SERVER_URL`，否则原生 App 会继续加载开发电脑上的 Vite 服务。只有本地调试原生 App 时才设置它，例如：
-
-```bash
-CAPACITOR_SERVER_URL="http://你的局域网IP:3000" npm run cap:sync
-```
-
-你的服务器公网 IP 是 `47.253.184.255`。部署到 ECS 后，网页前端使用 `VITE_API_BASE_URL="/api"`，由 Nginx 转发 `/api` 到 Node 服务；原生 App 构建时则使用完整公网地址：
-
-```bash
-VITE_API_BASE_URL="https://ngaasiu.studio/api" npm run cap:sync
-```
-
-后端生产环境必须设置 `JWT_SECRET`，不要使用示例值。可以在服务器生成：
-
-```bash
-openssl rand -hex 32
-```
-
-`.env`、数据库密码、JWT 密钥和上传文件不应提交到 GitHub；仓库只提交 `.env.example` 和源代码。
-
-### GitHub 服务器发布流程
-
-使用 GitHub 作为代码源。首次部署：
-
-```bash
-git clone https://github.com/RosyCandy/DingYue.git /var/www/DingYue
-cd /var/www/DingYue
-npm ci
-cp .env.example .env
-# 编辑 .env，填写真实数据库密码、GOOGLE_CLIENT_ID 和 JWT_SECRET
-npm run lint
-VITE_API_BASE_URL=/api npm run build
-```
-
-以后服务器更新代码：
-
-```bash
-cd /var/www/DingYue
-git pull --ff-only origin main
-npm ci
-npm run lint
-VITE_API_BASE_URL=/api npm run build
-sudo systemctl restart DingYue-api
-sudo rsync -a --delete dist/ /var/www/DingYue-web/
-```
-
-Node 服务建议使用 `systemd` 常驻运行，服务文件中的 `WorkingDirectory` 指向项目目录，`EnvironmentFile` 指向服务器上的 `.env`。Nginx 网站根目录建议使用 `/var/www/DingYue-web`，并把 `/api/` 反向代理到 `127.0.0.1:3001`。ECS 安全组只开放 `80`、`443` 和 `22`，不要开放 MySQL 的 `3306` 或 Node 的 `3001`。
-
-每次发布后验收：
-
-```bash
-curl http://47.99.119.180/api/health
-curl -I http://47.99.119.180
-```
-
-浏览器打开 `http://47.99.119.180`，在开发者工具 Network 中确认 API 请求指向 `47.99.119.180/api`，而不是 `localhost`。
-
-### 服务器调试流程
-
-修改服务器代码后先执行 `npm run lint`；后端调试可临时执行 `npm run server` 查看日志，确认无误后重启 `duoduo-api`。前端代码修改必须重新执行 `VITE_API_BASE_URL=/api npm run build` 并同步 `dist`，已经安装的 App 则必须重新执行 `npm run cap:sync` 后重新生成 APK/AAB 或 iOS 安装包。
-
-### Git 版本管理
-
-当前版本按 `1.0.3` 管理。建议发布前提交并打标签：
-
-```bash
-git add .
-git commit -m "release: 1.0.3"
-git tag -a v1.0.3 -m "DingYue 1.0.3"
-git push origin main --tags
-```
-
-服务器只部署稳定版本时，可以使用 `git fetch --tags` 后执行 `git checkout v1.0.3`；日常开发继续使用 `main` 分支。
-
-### 不绑定域名时使用 HTTPS
-
-不绑定域名可以先通过 `http://47.99.119.180` 使用网站。正式环境建议使用 HTTPS。免费证书通常要求域名；Let's Encrypt 已开始支持 IP 地址证书时，证书有效期会比域名证书短，且申请工具需要确认支持 IP SAN。申请失败时，最稳定的免费方案是注册一个域名后使用 Let's Encrypt 自动续期。
-
-如果网页使用 HTTPS，App 和网页 API 都必须使用 `https://47.99.119.180/api`，不能混用 HTTP，否则浏览器会拦截混合内容，iOS 也可能因 ATS 拒绝连接。没有 HTTPS 时，移动端暂时使用 `http://47.99.119.180/api`，仅建议用于测试。
