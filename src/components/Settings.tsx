@@ -8,6 +8,7 @@ import { cn } from '../lib/utils';
 import { Language, useI18n } from '../lib/i18n';
 import { useTheme } from '../lib/theme';
 import NotificationCenter from './NotificationCenter';
+import SocialLoginPage from './SocialLoginPage';
 import { useBackHandler } from '../lib/backButton';
 import { useAuth } from '../lib/auth';
 import { api, resolveAssetUrl, HelpArticle, LocalizedText, SecurityOverview, UserSettings } from '../lib/api';
@@ -25,7 +26,7 @@ const languageOptions: Array<{ value: Language; label: string }> = [
 const CONTACT_EMAIL = 'rosyhazes@126.com';
 
 // 站内导航：个人中心及其子页面在设置页内部切换（类似微信），不弹窗
-type SettingsView = 'main' | 'profile' | 'nickname' | 'email' | 'password' | 'passkey' | 'danger';
+type SettingsView = 'main' | 'profile' | 'nickname' | 'email' | 'password' | 'passkey' | 'danger' | 'social';
 
 const VIEW_PARENT: Record<Exclude<SettingsView, 'main'>, SettingsView> = {
   profile: 'main',
@@ -34,6 +35,7 @@ const VIEW_PARENT: Record<Exclude<SettingsView, 'main'>, SettingsView> = {
   password: 'profile',
   passkey: 'profile',
   danger: 'profile',
+  social: 'profile',
 };
 
 export default function Settings() {
@@ -355,7 +357,7 @@ export default function Settings() {
                 <span className="text-sm font-semibold text-on-surface">{t('settings.changeAvatar')}</span>
                 <span className="flex items-center gap-2">
                   {profile.avatar ? (
-                    <img src={resolveAssetUrl(profile.avatar)} alt="avatar" className="w-11 h-11 rounded-full object-cover border border-white shadow-sm" />
+                    <img src={resolveAssetUrl(profile.avatar)} alt="avatar" className="w-11 h-11 rounded-full object-cover border border-white shadow-sm bg-surface-container-low" />
                   ) : (
                     <span className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
                       {(displayName || 'U').charAt(0).toUpperCase()}
@@ -401,6 +403,11 @@ export default function Settings() {
                   {securityOverview.googleLinked && !securityOverview.hasPassword && (
                     <p className="text-xs text-amber-600 px-2 pt-2">{t('settings.needPasswordBeforeUnlink')}</p>
                   )}
+                  <ListRow
+                    label={t('settings.socialLogin')}
+                    value={t('settings.socialLoginDesc')}
+                    onClick={() => setView('social')}
+                  />
                 </>
               )}
               {/* 注销账号 */}
@@ -533,6 +540,9 @@ export default function Settings() {
           </div>
         );
 
+      case 'social':
+        return <SocialLoginPage onBack={goBack} />;
+
       default:
         return (
           <>
@@ -542,7 +552,7 @@ export default function Settings() {
               className="flex items-center gap-4 py-5 cursor-pointer group"
             >
               {profile.avatar ? (
-                <img src={resolveAssetUrl(profile.avatar)} alt="avatar" className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-sm" />
+                <img src={resolveAssetUrl(profile.avatar)} alt="avatar" className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-sm bg-surface-container-low" />
               ) : (
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary border-2 border-white shadow-sm">
                   {displayName ? (
@@ -738,7 +748,7 @@ export default function Settings() {
             </div>
             <div className="flex flex-col items-center gap-2 py-3">
               <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary text-2xl font-black">D</div>
-              <p className="text-lg font-black tracking-tight text-on-surface">DuoDuo</p>
+              <p className="text-lg font-black tracking-tight text-on-surface">DingYue</p>
               <p className="text-xs text-on-surface-variant font-medium">v{appVersion}</p>
               <p className="text-xs text-on-surface-variant text-center">{t('settings.aboutDesc')}</p>
             </div>

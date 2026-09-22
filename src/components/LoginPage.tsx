@@ -1,8 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Fingerprint } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { buildApiUrl } from '../lib/api';
-import { GoogleLogin } from '@react-oauth/google';  // npm install @react-oauth/google
+import { GoogleLogin } from '@react-oauth/google';
 import { isNativePlatform, signInWithGoogleNative, NativeGoogleSignInCanceledError } from '../lib/nativeGoogleAuth';
 import {
     isAppleLoginAvailable,
@@ -17,6 +16,7 @@ import {
     SOCIAL_LOGIN_ERROR_KEY
 } from '../lib/socialAuth';
 import { loginWithPasskey, isPasskeyUserCancellation } from '../lib/passkey';
+import { version as appVersion } from '../../package.json';
 
 type Mode = 'login' | 'register' | 'forgot';
 
@@ -41,23 +41,15 @@ export default function LoginPage() {
     const wechatAvailable = isWechatLoginAvailable();
     const qqAvailable = isQqLoginAvailable();
     const appleAvailable = isAppleLoginAvailable();
-    // 微信登录优先走 CZL 中继（无需企业认证），未配置中继时退回微信官方扫码
     const czlAvailable = isCzlWechatLoginAvailable();
     const wechatEntryAvailable = wechatAvailable || czlAvailable;
 
     useEffect(() => {
-        // 微信 / QQ OAuth 会跳转离开本页，错误信息通过 sessionStorage 带回来。
-        // App 根组件的换 token 请求在 LoginPage 挂载后才完成写入，这里补两次延迟复查。
-        const readError = () => {
-            const socialError = sessionStorage.getItem(SOCIAL_LOGIN_ERROR_KEY);
-            if (socialError) {
-                setError(socialError);
-                sessionStorage.removeItem(SOCIAL_LOGIN_ERROR_KEY);
-            }
-        };
-        readError();
-        const timers = [setTimeout(readError, 600), setTimeout(readError, 1800)];
-        return () => timers.forEach(clearTimeout);
+        const socialError = sessionStorage.getItem(SOCIAL_LOGIN_ERROR_KEY);
+        if (socialError) {
+            setError(socialError);
+            sessionStorage.removeItem(SOCIAL_LOGIN_ERROR_KEY);
+        }
     }, []);
 
     useEffect(() => {
@@ -83,22 +75,20 @@ export default function LoginPage() {
         setLoading(true);
         try {
             if (mode === 'login') {
-                const res = await fetch(buildApiUrl('/auth/login'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+                const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
                 const data = await res.json();
                 if (!res.ok) return setError(data.error || '登录失败');
                 login(data.token, data.user);
                 return;
             }
             if (mode === 'register') {
-                const res = await fetch(buildApiUrl('/auth/register'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, name, code }) });
+                const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, name, code }) });
                 const data = await res.json();
                 if (!res.ok) return setError(data.error || '注册失败');
-                // 注册即登录：邮箱已通过验证码验证
                 login(data.token, data.user);
                 return;
             }
-            // mode === 'forgot'
-            const res = await fetch(buildApiUrl('/auth/reset-password'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code, newPassword }) });
+            const res = await fetch('/api/auth/reset-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code, newPassword }) });
             const data = await res.json();
             if (!res.ok) return setError(data.error || '密码重置失败');
             setNotice('密码已重置，请使用新密码登录');
@@ -119,11 +109,10 @@ export default function LoginPage() {
         setCodeSending(true);
         try {
             const purpose = mode === 'forgot' ? 'reset_password' : 'register';
-            const res = await fetch(buildApiUrl('/auth/send-code'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim(), purpose }) });
+            const res = await fetch('/api/auth/send-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim(), purpose }) });
             const data = await res.json();
             if (!res.ok) return setError(data.error || '验证码发送失败');
             if (data.devCode) {
-                // 开发模式（服务端未配置 SMTP）：验证码直接回传并自动填入
                 setCode(data.devCode);
                 setNotice(`开发模式验证码：${data.devCode}`);
             } else {
@@ -138,13 +127,17 @@ export default function LoginPage() {
     };
 
     const sendCredentialToBackend = async (credential: string) => {
-        const res = await fetch(buildApiUrl('/auth/google'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }) });
-        const data = await res.json();
-        if (!res.ok) {
-            setError(data.error || 'Google 登录失败');
-            return;
+        try {
+            const res = await fetch('/api/auth/google', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }) });
+            const data = await res.json();
+            if (!res.ok) {
+                setError(data.error || 'Google 登录失败');
+                return;
+            }
+            login(data.token, data.user);
+        } catch {
+            setError('网络异常，请稍后重试');
         }
-        login(data.token, data.user);
     };
 
     const handleNativeGoogleLogin = async () => {
@@ -182,7 +175,7 @@ export default function LoginPage() {
         resetMessages();
         try {
             const { idToken, name } = await signInWithApple();
-            const res = await fetch(buildApiUrl('/auth/apple'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identityToken: idToken, name }) });
+            const res = await fetch('/api/auth/apple', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identityToken: idToken, name }) });
             const data = await res.json();
             if (!res.ok) return setError(data.error || 'Apple 登录失败');
             login(data.token, data.user);
@@ -202,7 +195,7 @@ export default function LoginPage() {
         <div className="min-h-screen flex items-center justify-center bg-surface px-6 py-10">
             <div className="w-full max-w-sm space-y-6">
                 <div className="text-center">
-                    <h1 className="text-3xl font-black tracking-tight">DuoDuo</h1>
+                    <h1 className="text-3xl font-black tracking-tight">DingYue 订阅管理助手</h1>
                     <p className="text-on-surface-variant mt-1 text-sm">{title}</p>
                 </div>
 
@@ -270,37 +263,16 @@ export default function LoginPage() {
                             <div className="flex-1 h-px bg-outline-variant/30" />
                         </div>
 
-                        <div className="flex items-center justify-center gap-4">
+                        <div className="flex flex-wrap items-center justify-center gap-3">
                             {wechatEntryAvailable && (
                                 <SocialButton label="微信登录" onClick={() => (czlAvailable ? beginCzlLogin() : beginWechatLogin())}>
-                                    <svg width="22" height="22" viewBox="0 0 24 24">
-                                        <path fill="#07C160" d="M9.5 4C5.36 4 2 6.69 2 10c0 1.89 1.08 3.56 2.78 4.66l-.7 2.1 2.44-1.23c.87.26 1.82.4 2.78.4.09 0 .18 0 .27-.01A6.4 6.4 0 0 1 9.5 15c0-3.31 3.13-6 7-6 .27 0 .54.01.8.04C16.71 6.15 13.4 4 9.5 4zM7 8.25a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5zm5 0a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5z"/>
-                                        <path fill="#07C160" d="M22 14.5c0-2.76-2.69-5-6-5s-6 2.24-6 5 2.69 5 6 5c.83 0 1.62-.13 2.35-.36l2.1 1.06-.6-1.8C21.16 17.63 22 16.14 22 14.5zm-8-.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5zm4 0a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5z"/>
-                                    </svg>
-                                </SocialButton>
-                            )}
-                            {qqAvailable && (
-                                <SocialButton label="QQ 登录" onClick={() => beginQqLogin()}>
-                                    <svg width="22" height="22" viewBox="0 0 24 24">
-                                        <ellipse cx="12" cy="10" rx="6.3" ry="8.3" fill="#12B7F5"/>
-                                        <ellipse cx="9.7" cy="9.4" rx="2" ry="2.7" fill="#fff"/>
-                                        <ellipse cx="14.3" cy="9.4" rx="2" ry="2.7" fill="#fff"/>
-                                        <circle cx="10.1" cy="9.8" r="0.9" fill="#333"/>
-                                        <circle cx="13.9" cy="9.8" r="0.9" fill="#333"/>
-                                        <path d="M9.7 12.9c1.5 1.1 3.1 1.1 4.6 0l-.6 2.6h-3.4z" fill="#F5A623"/>
-                                        <ellipse cx="8.6" cy="20.6" rx="2.2" ry="1.1" fill="#12B7F5"/>
-                                        <ellipse cx="15.4" cy="20.6" rx="2.2" ry="1.1" fill="#12B7F5"/>
-                                    </svg>
+                                    <svg width="22" height="22" viewBox="0 0 24 24"><path fill="#07C160" d="M9.5 4C5.36 4 2 6.69 2 10c0 1.89 1.08 3.56 2.78 4.66l-.7 2.1 2.44-1.23c.87.26 1.82.4 2.78.4.09 0 .18 0 .27-.01A6.4 6.4 0 0 1 9.5 15c0-3.31 3.13-6 7-6 .27 0 .54.01.8.04C16.71 6.15 13.4 4 9.5 4zM7 8.25a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5zm5 0a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5z"/><path fill="#07C160" d="M22 14.5c0-2.76-2.69-5-6-5s-6 2.24-6 5 2.69 5 6 5c.83 0 1.62-.13 2.35-.36l2.1 1.06-.6-1.8C21.16 17.63 22 16.14 22 14.5zm-8-.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5zm4 0a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5z"/></svg>
                                 </SocialButton>
                             )}
                             {appleAvailable && (
                                 <SocialButton label="通过 Apple 登录" onClick={() => void handleAppleLogin()} disabled={appleLoading}>
-                                    {appleLoading ? (
-                                        <span className="text-xs font-bold">···</span>
-                                    ) : (
-                                        <svg width="20" height="20" viewBox="0 0 24 24">
-                                            <path fill="#000000" d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/>
-                                        </svg>
+                                    {appleLoading ? <span className="text-xs font-bold">···</span> : (
+                                        <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#000000" d="M17.05 20.28c-.98.95-2.05.8-3.08.35-1.09-.46-2.09-.48-3.24 0-1.44.62-2.2.44-3.06-.35C2.79 15.25 3.51 7.59 9.05 7.31c1.35.07 2.29.74 3.08.8 1.18-.24 2.31-.93 3.57-.84 1.51.12 2.65.72 3.4 1.8-3.12 1.87-2.38 5.98.48 7.13-.57 1.5-1.31 2.99-2.54 4.09l.01-.01zM12.03 7.25c-.15-2.23 1.66-4.07 3.74-4.25.29 2.58-2.34 4.5-3.74 4.25z"/></svg>
                                     )}
                                 </SocialButton>
                             )}
@@ -335,6 +307,9 @@ export default function LoginPage() {
                         {mode === 'forgot' ? '返回登录' : mode === 'login' ? '注册' : '登录'}
                     </button>
                 </p>
+                <p className="text-center text-[10px] text-on-surface-variant font-medium opacity-40">
+                    DingYue v{appVersion}
+                </p>
             </div>
         </div>
     );
@@ -343,7 +318,7 @@ export default function LoginPage() {
 function SocialButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
     return (
         <button onClick={onClick} disabled={disabled} aria-label={label}
-                className="w-12 h-12 flex items-center justify-center rounded-xl border border-outline-variant/30 bg-white active:scale-95 transition-all disabled:opacity-50">
+                className="w-12 h-12 flex items-center justify-center rounded-full border border-outline-variant/30 bg-white active:scale-95 transition-all disabled:opacity-50">
             {children}
         </button>
     );

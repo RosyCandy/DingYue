@@ -23,6 +23,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- Deep link for CZL Connect WeChat callback: duoduoapp://czl-callback?code=xxx&state=xxx -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="duoduoapp" android:host="czl-callback" />
+            </intent-filter>
+
         </activity>
 
         <provider

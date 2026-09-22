@@ -15,6 +15,7 @@ import { api, buildApiUrl, resolveAssetUrl } from './lib/api';
 import { useTheme } from './lib/theme';
 import { consumeSocialOAuthCallback, SOCIAL_LOGIN_ERROR_KEY } from './lib/socialAuth';
 import { useAndroidBackButton } from './lib/backButton';
+import { App as CapApp } from '@capacitor/app';
 
 type Tab = 'dashboard' | 'subscriptions' | 'statistics' | 'settings';
 
@@ -35,6 +36,39 @@ export default function App() {
     () => activeTabRef.current,
     () => setActiveTab('dashboard')
   );
+
+  useEffect(() => {
+    // 安卓深链回调：微信 OAuth 授权后通过 duoduoapp://czl-callback 返回 App
+    const unsubscribe = CapApp.addListener('appUrlOpen', (event) => {
+      try {
+        const url = new URL(event.url);
+        if (url.host !== 'czl-callback') return;
+        const code = url.searchParams.get('code');
+        const state = url.searchParams.get('state');
+        if (!code) return;
+        void (async () => {
+          try {
+            const res = await fetch(buildApiUrl('/auth/czl'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code, redirectUri: `${window.location.origin}/` })
+            });
+            const data = await res.json();
+            if (res.ok) {
+              login(data.token, data.user);
+            } else {
+              sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, data.error || '微信登录失败');
+            }
+          } catch {
+            sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，微信登录失败');
+          }
+        })();
+      } catch {
+        // ignore malformed app url open events
+      }
+    });
+    return () => { unsubscribe.then((u) => u.remove()).catch(() => {}); };
+  }, [login]);
 
   useEffect(() => {
     // 微信 / QQ 网页版扫码登录会跳转离开应用再带 code 回来，在这里完成换 token

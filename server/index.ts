@@ -513,12 +513,12 @@ async function ensureDatabaseSchema() {
       ? userColumns.map((row: { COLUMN_NAME: string }) => row.COLUMN_NAME)
       : []
   );
-  for (const column of ['apple_id', 'wechat_id', 'qq_id', 'czl_id', 'avatar']) {
+  for (const column of ['apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id', 'avatar']) {
     if (!userColumnNames.has(column)) {
       await pool.execute(`ALTER TABLE users ADD COLUMN ${column} VARCHAR(255) NULL`);
     }
   }
-  for (const indexName of ['uniq_users_apple_id', 'uniq_users_wechat_id', 'uniq_users_qq_id', 'uniq_users_czl_id']) {
+  for (const indexName of ['uniq_users_apple_id', 'uniq_users_wechat_id', 'uniq_users_qq_id', 'uniq_users_czl_id', 'uniq_users_github_id', 'uniq_users_gitee_id']) {
     const [existingIndexes]: any = await pool.query(
       `SHOW INDEX FROM users WHERE Key_name = '${indexName}'`
     );
@@ -952,7 +952,7 @@ const consumeVerificationCode = async (email: string, purpose: CodePurpose, code
 // Social Login Helpers (Apple / WeChat / QQ)
 // ─────────────────────────────────────────────
 
-const SOCIAL_PROVIDER_COLUMNS = ['apple_id', 'wechat_id', 'qq_id', 'czl_id'] as const;
+const SOCIAL_PROVIDER_COLUMNS = ['apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id'] as const;
 type SocialProviderColumn = typeof SOCIAL_PROVIDER_COLUMNS[number];
 
 const findOrCreateSocialUser = async ({
@@ -1415,6 +1415,112 @@ app.post('/api/auth/czl', async (req, res) => {
   } catch (e: any) {
     if (process.env.NODE_ENV !== 'production') console.error('CZL login error:', e);
     res.status(400).json({ error: '登录失败: ' + e.message });
+  }
+});
+
+// POST /api/auth/github — GitHub OAuth 登录后回传 code
+app.post('/api/auth/github', async (req, res) => {
+  const { code } = req.body;
+  if (!code) {
+    return res.status(400).json({ error: '缺少 GitHub 登录 code' });
+  }
+  const clientId = process.env.GITHUB_APP_ID || '';
+  const clientSecret = process.env.GITHUB_APP_SECRET || '';
+  if (!clientId || !clientSecret) {
+    return res.status(501).json({ error: 'GitHub 登录暂未配置，请联系管理员' });
+  }
+  try {
+    const tokenRes = await directFetch('https://github.com/login/oauth/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code: String(code)
+      }).toString()
+    });
+    const tokenData: any = await tokenRes.json();
+    if (!tokenData.access_token) {
+      return res.status(400).json({ error: 'GitHub 登录失败: ' + (tokenData.error_description || tokenData.error || '无效 code') });
+    }
+
+    const userRes = await directFetch('https://api.github.com/user', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` }
+    });
+    const profile: any = await userRes.json();
+    if (!profile?.id) {
+      return res.status(400).json({ error: 'GitHub 登录失败: 无法获取用户信息' });
+    }
+
+    const email = typeof profile.email === 'string' && profile.email.includes('@') ? normalizeEmail(profile.email) : null;
+    const user = await findOrCreateSocialUser({
+      providerColumn: 'github_id',
+      providerId: String(profile.id),
+      email,
+      name: String(profile.name || profile.login || 'GitHub用户').trim(),
+      placeholderPrefix: 'github',
+      placeholderDomain: '@github.placeholder'
+    });
+    if (!user) {
+      return res.status(400).json({ error: 'GitHub 登录失败: 无法创建或匹配用户' });
+    }
+    res.json(buildAuthResponse(user));
+  } catch (e: any) {
+    if (process.env.NODE_ENV !== 'production') console.error('GitHub login error:', e);
+    res.status(400).json({ error: 'GitHub 登录失败: ' + e.message });
+  }
+});
+
+// POST /api/auth/gitee — Gitee OAuth 登录后回传 code
+app.post('/api/auth/gitee', async (req, res) => {
+  const { code } = req.body;
+  if (!code) {
+    return res.status(400).json({ error: '缺少 Gitee 登录 code' });
+  }
+  const clientId = process.env.GITEE_APP_ID || '';
+  const clientSecret = process.env.GITEE_APP_SECRET || '';
+  if (!clientId || !clientSecret) {
+    return res.status(501).json({ error: 'Gitee 登录暂未配置，请联系管理员' });
+  }
+  try {
+    const tokenRes = await directFetch('https://gitee.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: String(code),
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: 'https://ngaasiu.studio/'
+      }).toString()
+    });
+    const tokenData: any = await tokenRes.json();
+    if (!tokenData.access_token) {
+      return res.status(400).json({ error: 'Gitee 登录失败: ' + (tokenData.error_description || tokenData.error || '无效 code') });
+    }
+
+    const userRes = await directFetch('https://gitee.com/api/v5/user?access_token=' + encodeURIComponent(tokenData.access_token));
+    const profile: any = await userRes.json();
+    if (!profile?.id) {
+      return res.status(400).json({ error: 'Gitee 登录失败: 无法获取用户信息' });
+    }
+
+    const email = typeof profile.email === 'string' && profile.email.includes('@') ? normalizeEmail(profile.email) : null;
+    const user = await findOrCreateSocialUser({
+      providerColumn: 'gitee_id',
+      providerId: String(profile.id),
+      email,
+      name: String(profile.name || profile.login || 'Gitee用户').trim(),
+      placeholderPrefix: 'gitee',
+      placeholderDomain: '@gitee.placeholder'
+    });
+    if (!user) {
+      return res.status(400).json({ error: 'Gitee 登录失败: 无法创建或匹配用户' });
+    }
+    res.json(buildAuthResponse(user));
+  } catch (e: any) {
+    if (process.env.NODE_ENV !== 'production') console.error('Gitee login error:', e);
+    res.status(400).json({ error: 'Gitee 登录失败: ' + e.message });
   }
 });
 
@@ -2482,54 +2588,16 @@ app.get('/api/help/articles', authRequired, async (_req: AuthenticatedRequest, r
       summary: { en: 'Learn how upcoming renewals are detected and notified.', zh: '了解系统如何检测即将到来的续费并发送通知。' },
       content: {
         en: [
-          'DuoDuo checks the next billing date of every subscription every day.',
+          'DingYue checks the next billing date of every subscription every day.',
           'When a renewal is within 3 days, a billing_due notification appears in the Message Center and the subscription is marked as "urgent" on the dashboard.',
           'Free trials generate a trial_ending notification 3 days before the trial finishes, so you can cancel before being charged.',
           'Tip: keep the next billing date accurate when adding or editing a subscription — reminders are calculated from it.'
         ],
         zh: [
-          'DuoDuo 每天都会检查每个订阅的下次扣费日期。',
+          'DingYue 每天都会检查每个订阅的下次扣费日期。',
           '当距离续费不足 3 天时，消息中心会出现账单提醒，仪表盘上该订阅会被标记为“即将到期”。',
           '免费试用会在结束前 3 天生成“试用即将结束”提醒，方便你在扣费前取消。',
           '小贴士：添加或编辑订阅时请保持下次扣费日期准确，所有提醒都基于这个日期计算。'
-        ]
-      }
-    },
-    {
-      id: 'manage-membership',
-      title: { en: 'Manage membership and restore purchases', zh: '管理会员与恢复购买' },
-      summary: { en: 'Steps to cancel auto-renew or restore previous purchases.', zh: '如何取消自动续费或恢复已购买的会员。' },
-      content: {
-        en: [
-          'Open Settings → the membership banner → Manage to view your current plan and expiry date.',
-          'Cancel auto-renew: tap "Cancel auto-renew" in the membership page. Your benefits remain valid until the expiry date.',
-          'Restore purchases: if you reinstalled the app or switched devices, tap "Restore purchases" on the membership page while logged in with the same account.',
-          'Upgrading plans takes effect immediately; the unused value of the old plan is not refunded pro-rated.'
-        ],
-        zh: [
-          '打开「设置」→ 顶部会员卡片 →「管理会员」，可以查看当前套餐和到期时间。',
-          '取消自动续费：在会员页面点击「取消自动续费」，会员权益会保留到当前到期日。',
-          '恢复购买：重新安装应用或更换设备后，登录同一账户，在会员页面点击「恢复购买」即可找回会员状态。',
-          '升级套餐立即生效；旧套餐未使用部分不支持按比例退款。'
-        ]
-      }
-    },
-    {
-      id: 'payment-methods',
-      title: { en: 'Manage payment methods', zh: '管理支付方式' },
-      summary: { en: 'Add, remove, and set a default payment method in Wallet.', zh: '在钱包中添加、删除支付方式或设置默认支付方式。' },
-      content: {
-        en: [
-          'Tap the wallet icon in the top-right corner of the home screen to open Wallet.',
-          'Add a payment method: choose a label (e.g. "Visa ending 4242") and a type such as Apple Pay or credit card.',
-          'Long-press or tap the ⋯ menu on a card to edit, set as default, or delete it. The default method is suggested first when activating a membership.',
-          'Payment methods are for bookkeeping only — DuoDuo never stores card numbers or charges them.'
-        ],
-        zh: [
-          '在首页右上角点击钱包图标，打开「支付方式」管理。',
-          '添加支付方式：填写名称（例如“尾号 4242 的 Visa”）并选择类型（Apple Pay、信用卡等）。',
-          '点击卡片上的菜单可以编辑、设为默认或删除；开通会员时会优先推荐默认支付方式。',
-          '支付方式仅用于记账备注——DuoDuo 不会存储卡号，也不会产生任何扣款。'
         ]
       }
     }
