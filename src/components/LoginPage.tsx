@@ -8,10 +8,12 @@ import {
     isAppleLoginAvailable,
     isWechatLoginAvailable,
     isQqLoginAvailable,
+    isCzlWechatLoginAvailable,
     signInWithApple,
     AppleSignInCanceledError,
     beginWechatLogin,
     beginQqLogin,
+    beginCzlLogin,
     SOCIAL_LOGIN_ERROR_KEY
 } from '../lib/socialAuth';
 import { loginWithPasskey, isPasskeyUserCancellation } from '../lib/passkey';
@@ -39,14 +41,23 @@ export default function LoginPage() {
     const wechatAvailable = isWechatLoginAvailable();
     const qqAvailable = isQqLoginAvailable();
     const appleAvailable = isAppleLoginAvailable();
+    // 微信登录优先走 CZL 中继（无需企业认证），未配置中继时退回微信官方扫码
+    const czlAvailable = isCzlWechatLoginAvailable();
+    const wechatEntryAvailable = wechatAvailable || czlAvailable;
 
     useEffect(() => {
-        // 微信 / QQ OAuth 会跳转离开本页，错误信息通过 sessionStorage 带回来
-        const socialError = sessionStorage.getItem(SOCIAL_LOGIN_ERROR_KEY);
-        if (socialError) {
-            setError(socialError);
-            sessionStorage.removeItem(SOCIAL_LOGIN_ERROR_KEY);
-        }
+        // 微信 / QQ OAuth 会跳转离开本页，错误信息通过 sessionStorage 带回来。
+        // App 根组件的换 token 请求在 LoginPage 挂载后才完成写入，这里补两次延迟复查。
+        const readError = () => {
+            const socialError = sessionStorage.getItem(SOCIAL_LOGIN_ERROR_KEY);
+            if (socialError) {
+                setError(socialError);
+                sessionStorage.removeItem(SOCIAL_LOGIN_ERROR_KEY);
+            }
+        };
+        readError();
+        const timers = [setTimeout(readError, 600), setTimeout(readError, 1800)];
+        return () => timers.forEach(clearTimeout);
     }, []);
 
     useEffect(() => {
@@ -260,8 +271,8 @@ export default function LoginPage() {
                         </div>
 
                         <div className="flex items-center justify-center gap-4">
-                            {wechatAvailable && (
-                                <SocialButton label="微信登录" onClick={() => beginWechatLogin()}>
+                            {wechatEntryAvailable && (
+                                <SocialButton label="微信登录" onClick={() => (czlAvailable ? beginCzlLogin() : beginWechatLogin())}>
                                     <svg width="22" height="22" viewBox="0 0 24 24">
                                         <path fill="#07C160" d="M9.5 4C5.36 4 2 6.69 2 10c0 1.89 1.08 3.56 2.78 4.66l-.7 2.1 2.44-1.23c.87.26 1.82.4 2.78.4.09 0 .18 0 .27-.01A6.4 6.4 0 0 1 9.5 15c0-3.31 3.13-6 7-6 .27 0 .54.01.8.04C16.71 6.15 13.4 4 9.5 4zM7 8.25a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5zm5 0a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5z"/>
                                         <path fill="#07C160" d="M22 14.5c0-2.76-2.69-5-6-5s-6 2.24-6 5 2.69 5 6 5c.83 0 1.62-.13 2.35-.36l2.1 1.06-.6-1.8C21.16 17.63 22 16.14 22 14.5zm-8-.5a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5zm4 0a.75.75 0 1 1 0-1.5.75.75 0 0 1 0 1.5z"/>

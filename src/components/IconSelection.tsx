@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Search, ChevronRight, ImagePlus, FolderOpen, Loader2 } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, resolveAssetUrl } from '../lib/api';
 
 interface IconSelectionProps {
   onSelect: (icon: string) => void;
@@ -144,7 +144,7 @@ export default function IconSelection({ onSelect, onBack }: IconSelectionProps) 
               className="w-16 h-16 rounded-xl overflow-hidden shadow-sm group-active:scale-90 transition-transform flex items-center justify-center"
               style={{ backgroundColor: service.color }}
             >
-              <img className="w-10 h-10 object-contain" src={service.icon} alt={service.name} referrerPolicy="no-referrer" />
+              <img className="w-10 h-10 object-contain" src={resolveAssetUrl(service.icon)} alt={service.name} referrerPolicy="no-referrer" />
             </div>
             <span className="text-[13px] font-semibold text-on-surface">{service.name}</span>
           </button>

@@ -11,7 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useI18n } from './lib/i18n';
 import { useAuth } from './lib/auth';
 import LoginPage from './components/LoginPage';
-import { api, buildApiUrl } from './lib/api';
+import { api, buildApiUrl, resolveAssetUrl } from './lib/api';
 import { useTheme } from './lib/theme';
 import { consumeSocialOAuthCallback, SOCIAL_LOGIN_ERROR_KEY } from './lib/socialAuth';
 import { useAndroidBackButton } from './lib/backButton';
@@ -118,7 +118,7 @@ export default function App() {
             aria-label="Open profile settings"
           >
             {user.avatar ? (
-              <img src={user.avatar} alt="" className="w-full h-full object-cover" />
+              <img src={resolveAssetUrl(user.avatar)} alt="" className="w-full h-full object-cover" />
             ) : (
               (user.name || user.email).trim().charAt(0).toUpperCase()
             )}

@@ -63,6 +63,12 @@ const WECHAT_APP_SECRET = process.env.WECHAT_APP_SECRET || '';
 const QQ_APP_ID = process.env.QQ_APP_ID || '';
 const QQ_APP_SECRET = process.env.QQ_APP_SECRET || '';
 
+// CZL Connect（connect.czl.net）OAuth2.0 中继登录：个人开发者绕过微信/QQ 企业认证的折衷方案。
+// 上游用户实际授权给 CZL，本服务端用授权码换 CZL 的用户信息后按 czl_id 建户/匹配。
+const CZL_CLIENT_ID = process.env.CZL_CLIENT_ID || '';
+const CZL_CLIENT_SECRET = process.env.CZL_CLIENT_SECRET || '';
+const CZL_BASE_URL = (process.env.CZL_BASE_URL || 'https://connect.czl.net').replace(/\/+$/, '');
+
 // 邮件发送：未配置 SMTP 时退化为“开发模式”，验证码只打印到服务端日志，
 // 且仅在非生产环境随响应返回 devCode，方便本地调试。
 const SMTP_HOST = process.env.SMTP_HOST || '';
@@ -507,12 +513,12 @@ async function ensureDatabaseSchema() {
       ? userColumns.map((row: { COLUMN_NAME: string }) => row.COLUMN_NAME)
       : []
   );
-  for (const column of ['apple_id', 'wechat_id', 'qq_id', 'avatar']) {
+  for (const column of ['apple_id', 'wechat_id', 'qq_id', 'czl_id', 'avatar']) {
     if (!userColumnNames.has(column)) {
       await pool.execute(`ALTER TABLE users ADD COLUMN ${column} VARCHAR(255) NULL`);
     }
   }
-  for (const indexName of ['uniq_users_apple_id', 'uniq_users_wechat_id', 'uniq_users_qq_id']) {
+  for (const indexName of ['uniq_users_apple_id', 'uniq_users_wechat_id', 'uniq_users_qq_id', 'uniq_users_czl_id']) {
     const [existingIndexes]: any = await pool.query(
       `SHOW INDEX FROM users WHERE Key_name = '${indexName}'`
     );
@@ -850,7 +856,7 @@ const CODE_HOURLY_LIMIT = 5;
 
 // 微信 / QQ / Apple 匿名用户没有真实邮箱，用占位邮箱满足 users.email 的唯一约束。
 // 占位邮箱不能用于收验证码，找回密码接口会显式拒绝。
-const EMAIL_PLACEHOLDER_DOMAINS = ['@wechat.placeholder', '@qq.placeholder', '@apple.placeholder'];
+const EMAIL_PLACEHOLDER_DOMAINS = ['@wechat.placeholder', '@qq.placeholder', '@apple.placeholder', '@czl.placeholder'];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeEmail = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -946,7 +952,7 @@ const consumeVerificationCode = async (email: string, purpose: CodePurpose, code
 // Social Login Helpers (Apple / WeChat / QQ)
 // ─────────────────────────────────────────────
 
-const SOCIAL_PROVIDER_COLUMNS = ['apple_id', 'wechat_id', 'qq_id'] as const;
+const SOCIAL_PROVIDER_COLUMNS = ['apple_id', 'wechat_id', 'qq_id', 'czl_id'] as const;
 type SocialProviderColumn = typeof SOCIAL_PROVIDER_COLUMNS[number];
 
 const findOrCreateSocialUser = async ({
@@ -1347,6 +1353,68 @@ app.post('/api/auth/qq', async (req, res) => {
   } catch (e: any) {
     if (process.env.NODE_ENV !== 'production') console.error('QQ login error:', e);
     res.status(400).json({ error: 'QQ 登录失败: ' + e.message });
+  }
+});
+
+// POST /api/auth/czl — CZL Connect 中继登录（默认限定微信上游）回传 code。
+// 文档：授权 https://{base}/oauth2/authorize，换票 POST /api/oauth2/token（form），
+// 用户信息 GET /api/oauth2/userinfo（Bearer）→ { id, username, nickname, email, avatar, upstreams }
+app.post('/api/auth/czl', async (req, res) => {
+  const { code, redirectUri } = req.body;
+  if (!code) {
+    return res.status(400).json({ error: '缺少登录 code' });
+  }
+  if (!CZL_CLIENT_ID || !CZL_CLIENT_SECRET) {
+    return res.status(501).json({ error: '该登录方式暂未配置，请联系管理员' });
+  }
+  try {
+    const tokenRes = await directFetch(`${CZL_BASE_URL}/api/oauth2/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: String(code),
+        client_id: CZL_CLIENT_ID,
+        client_secret: CZL_CLIENT_SECRET,
+        ...(redirectUri ? { redirect_uri: String(redirectUri) } : {})
+      }).toString()
+    });
+    const tokenData: any = await tokenRes.json();
+    if (!tokenData.access_token) {
+      const reason = tokenData.error_description || tokenData.error || '无效 code';
+      return res.status(400).json({ error: '登录失败: ' + reason });
+    }
+
+    const infoRes = await directFetch(`${CZL_BASE_URL}/api/oauth2/userinfo`, {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` }
+    });
+    const profile: any = await infoRes.json();
+    if (!profile?.id) {
+      return res.status(400).json({ error: '登录失败: 无法获取用户信息' });
+    }
+
+    // CZL 返回的邮箱不一定已验证，只有明确 verified 才允许按邮箱关联已有账户，
+    // 否则视为匿名用户走占位邮箱，避免恶意抢绑他人邮箱账户。
+    const verifiedEmail =
+      profile.email_verified === true && typeof profile.email === 'string' && profile.email.includes('@')
+        ? normalizeEmail(profile.email)
+        : null;
+
+    const user = await findOrCreateSocialUser({
+      providerColumn: 'czl_id',
+      providerId: String(profile.id),
+      email: verifiedEmail,
+      name: String(profile.nickname || profile.username || '').trim() || '微信用户',
+      placeholderPrefix: 'czl',
+      placeholderDomain: '@czl.placeholder'
+    });
+    if (!user) {
+      return res.status(400).json({ error: '登录失败: 无法创建或匹配用户' });
+    }
+    res.json(buildAuthResponse(user));
+  } catch (e: any) {
+    if (process.env.NODE_ENV !== 'production') console.error('CZL login error:', e);
+    res.status(400).json({ error: '登录失败: ' + e.message });
   }
 });
 

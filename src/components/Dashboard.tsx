@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TrendingUp, CheckCircle2, Timer, ArrowRight, Loader2, ChevronDown, Search } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, resolveAssetUrl } from '../lib/api';
 import { Subscription } from '../constants';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
@@ -205,7 +205,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
             <div key={sub.id} className="flex-shrink-0 w-64 bg-surface-container-lowest p-5 rounded-xl shadow-sm border border-outline-variant/10">
               <div className="flex items-center justify-between mb-4">
                 <div className="w-10 h-10 rounded-lg bg-surface-container-low flex items-center justify-center">
-                  <img src={sub.icon} alt={sub.name} className="w-6 h-6 object-contain" referrerPolicy="no-referrer" />
+                  <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-6 h-6 object-contain" referrerPolicy="no-referrer" />
                 </div>
                 <span className="px-2.5 py-1 rounded-full bg-red-100 text-red-600 text-[10px] font-bold uppercase tracking-wider">
                   {t('dashboard.in')} {sub.daysLeft} {t('dashboard.days')}
@@ -271,7 +271,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
 
                   <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-container-low shrink-0 flex items-center justify-center">
                     {sub.icon ? (
-                        <img src={sub.icon} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                         <span className="text-xs font-bold text-primary uppercase">
                           {sub.name ? sub.name.charAt(0) : '?'}

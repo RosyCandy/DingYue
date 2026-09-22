@@ -21,27 +21,17 @@ export const buildApiUrl = (path: string): string => {
   return `${API_URL}${normalizedPath}`;
 };
 
-export type MembershipPlan = 'trial' | 'monthly' | 'annual' | 'lifetime';
+// API 地址为绝对地址（原生 App 构建）时，服务端返回的 /api/uploads/... 相对路径
+// 需要补上 API 域名才能在 WebView(localhost origin) 里加载；网页端保持相对路径。
+const API_ORIGIN = API_URL.startsWith('http')
+  ? API_URL.replace(/^(https?:\/\/[^/]+).*/, '$1')
+  : '';
 
-export interface Membership {
-  id: number;
-  plan: MembershipPlan;
-  status: 'trial' | 'active' | 'expired' | 'canceled';
-  amount: number;
-  currency: string;
-  paymentMethod: string;
-  payerEmail: string;
-  autoRenew: boolean;
-  startsAt: string;
-  expiresAt: string | null;
-}
-
-export interface ActivateMembershipPayload {
-  plan: MembershipPlan;
-  paymentMethod: string;
-  payerEmail: string;
-  autoRenew: boolean;
-}
+export const resolveAssetUrl = (url: string | null | undefined): string => {
+  if (!url) return '';
+  if (!url.startsWith('/')) return url;
+  return `${API_ORIGIN}${url}`;
+};
 
 export interface NotificationItem {
   id: number;
@@ -274,19 +264,6 @@ const buildUpdatePayload = (sub: Partial<Subscription> | Record<string, any>) =>
   return payload;
 };
 
-const normalizeMembership = (item: any): Membership => ({
-  id: Number(item.id),
-  plan: item.plan as MembershipPlan,
-  status: item.status as Membership['status'],
-  amount: Number(item.amount) || 0,
-  currency: item.currency || 'CNY',
-  paymentMethod: item.paymentMethod ?? item.payment_method ?? '',
-  payerEmail: item.payerEmail ?? item.payer_email ?? '',
-  autoRenew: Boolean(item.autoRenew ?? item.auto_renew),
-  startsAt: item.startsAt ?? item.starts_at,
-  expiresAt: item.expiresAt ?? item.expires_at ?? null,
-});
-
 const normalizeNotification = (item: any): NotificationItem => ({
   id: Number(item.id),
   type: (item.type || 'system') as NotificationItem['type'],
@@ -374,62 +351,6 @@ export const api = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await parseApiError(response));
-  },
-
-  async getCurrentMembership(): Promise<Membership | null> {
-    const response = await fetch(`${API_URL}/membership/current`, {
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error(await parseApiError(response));
-    const data = await response.json();
-    return data ? normalizeMembership(data) : null;
-  },
-
-  async activateMembership(payload: ActivateMembershipPayload): Promise<Membership> {
-    const response = await fetch(`${API_URL}/membership/activate`, {
-      method: 'POST',
-      headers: getAuthHeaders(true),
-      body: JSON.stringify({
-        plan: payload.plan,
-        payment_method: payload.paymentMethod,
-        payer_email: payload.payerEmail,
-        auto_renew: payload.autoRenew,
-      }),
-    });
-    if (!response.ok) throw new Error(await parseApiError(response));
-    const data = await response.json();
-    return normalizeMembership(data);
-  },
-
-  async getMembershipHistory(): Promise<Membership[]> {
-    const response = await fetch(`${API_URL}/membership/history`, {
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) throw new Error(await parseApiError(response));
-    const data = await response.json();
-    return Array.isArray(data) ? data.map(normalizeMembership) : [];
-  },
-
-  async cancelMembershipAutoRenew(): Promise<Membership> {
-    const response = await fetch(`${API_URL}/membership/cancel-auto-renew`, {
-      method: 'POST',
-      headers: getAuthHeaders(true),
-      body: JSON.stringify({}),
-    });
-    if (!response.ok) throw new Error(await parseApiError(response));
-    const data = await response.json();
-    return normalizeMembership(data);
-  },
-
-  async restoreMembershipPurchase(): Promise<Membership> {
-    const response = await fetch(`${API_URL}/membership/restore`, {
-      method: 'POST',
-      headers: getAuthHeaders(true),
-      body: JSON.stringify({}),
-    });
-    if (!response.ok) throw new Error(await parseApiError(response));
-    const data = await response.json();
-    return normalizeMembership(data);
   },
 
   async getNotifications(): Promise<NotificationItem[]> {

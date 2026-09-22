@@ -7,12 +7,21 @@ const APPLE_CLIENT_ID = import.meta.env.VITE_APPLE_CLIENT_ID || '';
 const WECHAT_APP_ID = import.meta.env.VITE_WECHAT_APP_ID || '';
 const QQ_APP_ID = import.meta.env.VITE_QQ_APP_ID || '';
 
+// CZL Connect 中继登录（connect.czl.net）：个人开发者无法过微信/QQ 企业认证时的折衷方案。
+// 授权发起在前端，code 换用户信息在后端 /api/auth/czl 完成。
+const CZL_CLIENT_ID = import.meta.env.VITE_CZL_CLIENT_ID || '';
+const CZL_BASE_URL = 'https://connect.czl.net';
+
 // 微信 / QQ 的 OAuth 只实现了 Web 扫码流程；原生端没有可靠插件，先隐藏。
 export const isWechatLoginAvailable = (): boolean =>
   Boolean(WECHAT_APP_ID) && !Capacitor.isNativePlatform();
 
 export const isQqLoginAvailable = (): boolean =>
   Boolean(QQ_APP_ID) && !Capacitor.isNativePlatform();
+
+// CZL 中继的微信登录同样只走 Web 跳转流程。
+export const isCzlWechatLoginAvailable = (): boolean =>
+  Boolean(CZL_CLIENT_ID) && !Capacitor.isNativePlatform();
 
 // Apple：iOS 原生走 AuthenticationServices；Web / Android 走插件的 Apple JS SDK（popup）。
 export const isAppleLoginAvailable = (): boolean => {
@@ -67,7 +76,7 @@ const OAUTH_STATE_KEY = 'social_oauth_state';
 // OAuth 跳转后回到应用时，如果登录失败，通过 sessionStorage 把错误带给登录页展示
 export const SOCIAL_LOGIN_ERROR_KEY = 'social_login_error';
 
-const buildOAuthState = (prefix: 'wx' | 'qq'): string => {
+const buildOAuthState = (prefix: 'wx' | 'qq' | 'czl'): string => {
   const state = `${prefix}_${crypto.randomUUID()}`;
   sessionStorage.setItem(OAUTH_STATE_KEY, state);
   return state;
@@ -98,7 +107,22 @@ export function beginQqLogin(): void {
   window.location.href = `https://graph.qq.com/oauth2.0/authorize?${params.toString()}`;
 }
 
-export type SocialOAuthProvider = 'wechat' | 'qq';
+// CZL Connect 中继登录，upstream_providers=wechat 把授权页限定为微信入口。
+// redirect_uri 必须与 CZL 后台登记的回调地址完全一致（含末尾斜杠）。
+export function beginCzlLogin(): void {
+  if (!CZL_CLIENT_ID) return;
+  const params = new URLSearchParams({
+    response_type: 'code',
+    client_id: CZL_CLIENT_ID,
+    redirect_uri: getRedirectUri(),
+    scope: 'read',
+    state: buildOAuthState('czl'),
+    upstream_providers: 'wechat'
+  });
+  window.location.href = `${CZL_BASE_URL}/oauth2/authorize?${params.toString()}`;
+}
+
+export type SocialOAuthProvider = 'wechat' | 'qq' | 'czl';
 
 export type SocialOAuthCallback = {
   provider: SocialOAuthProvider;
@@ -119,7 +143,9 @@ export function consumeSocialOAuthCallback(): SocialOAuthCallback | null {
     ? 'wechat'
     : state.startsWith('qq_')
       ? 'qq'
-      : null;
+      : state.startsWith('czl_')
+        ? 'czl'
+        : null;
   const savedState = sessionStorage.getItem(OAUTH_STATE_KEY);
   sessionStorage.removeItem(OAUTH_STATE_KEY);
 

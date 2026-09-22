@@ -1,17 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  User, Bell, Lock, HelpCircle, LogOut, ChevronRight, ChevronDown, Star, RefreshCw, Palette, Languages,
+  User, Bell, Lock, HelpCircle, LogOut, ChevronRight, ChevronDown, RefreshCw, Palette, Languages,
   X, Check, Loader2, Info, Mail, ArrowLeft, Fingerprint, Trash2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import Premium from './Premium';
 import { Language, useI18n } from '../lib/i18n';
 import { useTheme } from '../lib/theme';
 import NotificationCenter from './NotificationCenter';
 import { useBackHandler } from '../lib/backButton';
 import { useAuth } from '../lib/auth';
-import { api, HelpArticle, LocalizedText, Membership, SecurityOverview, UserSettings } from '../lib/api';
+import { api, resolveAssetUrl, HelpArticle, LocalizedText, SecurityOverview, UserSettings } from '../lib/api';
 import { registerPasskey, isPasskeyUserCancellation, isPasskeyAlreadyRegistered } from '../lib/passkey';
 import { version as appVersion } from '../../package.json';
 
@@ -39,14 +38,12 @@ const VIEW_PARENT: Record<Exclude<SettingsView, 'main'>, SettingsView> = {
 
 export default function Settings() {
   const [view, setView] = useState<SettingsView>('main');
-  const [showPremium, setShowPremium] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [showLanguageSelect, setShowLanguageSelect] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
-  const [currentMembership, setCurrentMembership] = useState<Membership | null>(null);
   const [profile, setProfile] = useState<{ name: string; avatar: string | null }>({ name: '', avatar: null });
   const [showHelpModal, setShowHelpModal] = useState(false);
   const [showAboutModal, setShowAboutModal] = useState(false);
@@ -83,26 +80,15 @@ export default function Settings() {
   const pickLocalized = (text: LocalizedText): string =>
     language === '简体中文' || language === '繁體中文' ? text.zh || text.en : text.en || text.zh;
 
-  const loadMembership = async () => {
-    try {
-      const membership = await api.getCurrentMembership();
-      setCurrentMembership(membership);
-    } catch {
-      setCurrentMembership(null);
-    }
-  };
-
   const loadSettings = async () => {
     try {
       setSettingsLoading(true);
       setSettingsError(null);
-      const [data, membership, profileData] = await Promise.all([
+      const [data, profileData] = await Promise.all([
         api.getUserSettings(),
-        api.getCurrentMembership(),
         api.getProfile().catch(() => null),
       ]);
       setUserSettings(data);
-      setCurrentMembership(membership);
       setLanguage(data.language);
       setTheme(data.theme);
       if (profileData) {
@@ -192,27 +178,6 @@ export default function Settings() {
     if (Number.isNaN(date.getTime())) return t('settings.lastSync');
     return t('settings.lastSyncAt').replace('{time}', date.toLocaleString());
   };
-
-  const getPlanLabel = (plan: Membership['plan']) => {
-    if (plan === 'trial') return t('premium.freeTrial');
-    if (plan === 'monthly') return t('premium.monthly');
-    if (plan === 'annual') return t('premium.annual');
-    return t('premium.lifetime');
-  };
-
-  const formatMembershipExpiry = (membership: Membership) => {
-    if (!membership.expiresAt) return t('settings.memberLifetime');
-    const date = new Date(membership.expiresAt);
-    if (Number.isNaN(date.getTime())) return t('settings.memberLifetime');
-    return date.toLocaleDateString();
-  };
-
-  const isPremiumMember = Boolean(
-    currentMembership &&
-      currentMembership.status !== 'expired' &&
-      currentMembership.status !== 'canceled' &&
-      (!currentMembership.expiresAt || new Date(currentMembership.expiresAt).getTime() > Date.now())
-  );
 
   const handleOpenHelp = async () => {
     try {
@@ -370,13 +335,6 @@ export default function Settings() {
     }
   };
 
-  const handleClosePremium = async () => {
-    setShowPremium(false);
-    await loadMembership();
-  };
-
-  if (showPremium) return <Premium onClose={() => void handleClosePremium()} />;
-
   const displayName = profile.name || user?.name || '';
 
   const renderView = () => {
@@ -397,7 +355,7 @@ export default function Settings() {
                 <span className="text-sm font-semibold text-on-surface">{t('settings.changeAvatar')}</span>
                 <span className="flex items-center gap-2">
                   {profile.avatar ? (
-                    <img src={profile.avatar} alt="avatar" className="w-11 h-11 rounded-full object-cover border border-white shadow-sm" />
+                    <img src={resolveAssetUrl(profile.avatar)} alt="avatar" className="w-11 h-11 rounded-full object-cover border border-white shadow-sm" />
                   ) : (
                     <span className="w-11 h-11 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
                       {(displayName || 'U').charAt(0).toUpperCase()}
@@ -470,7 +428,7 @@ export default function Settings() {
                 disabled={savingProfileName || !profile.name.trim()}
                 className="w-full bg-primary text-white px-3 py-3 rounded-xl text-sm font-bold disabled:opacity-70 active:scale-[0.98] transition-transform"
               >
-                {savingProfileName ? t('premium.processing') : t('settings.saveProfile')}
+                {savingProfileName ? t('settings.processing') : t('settings.saveProfile')}
               </button>
             </div>
           </div>
@@ -494,7 +452,7 @@ export default function Settings() {
                 disabled={savingEmail}
                 className="w-full bg-primary text-white px-3 py-3 rounded-xl text-sm font-bold disabled:opacity-70 active:scale-[0.98] transition-transform"
               >
-                {savingEmail ? t('premium.processing') : t('settings.saveEmail')}
+                {savingEmail ? t('settings.processing') : t('settings.saveEmail')}
               </button>
             </div>
           </div>
@@ -527,7 +485,7 @@ export default function Settings() {
                 disabled={savingPassword}
                 className="w-full bg-primary text-white px-3 py-3 rounded-xl text-sm font-bold disabled:opacity-70 active:scale-[0.98] transition-transform"
               >
-                {savingPassword ? t('premium.processing') : (securityOverview?.hasPassword ? t('settings.changePassword') : t('settings.setPassword'))}
+                {savingPassword ? t('settings.processing') : (securityOverview?.hasPassword ? t('settings.changePassword') : t('settings.setPassword'))}
               </button>
             </div>
           </div>
@@ -584,7 +542,7 @@ export default function Settings() {
               className="flex items-center gap-4 py-5 cursor-pointer group"
             >
               {profile.avatar ? (
-                <img src={profile.avatar} alt="avatar" className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-sm" />
+                <img src={resolveAssetUrl(profile.avatar)} alt="avatar" className="w-16 h-16 rounded-full object-cover border-2 border-white shadow-sm" />
               ) : (
                 <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center text-primary border-2 border-white shadow-sm">
                   {displayName ? (
@@ -600,55 +558,6 @@ export default function Settings() {
               </div>
               <ChevronRight className="text-outline-variant group-hover:text-primary transition-colors" size={20} />
             </section>
-
-            {/* Pro Banner */}
-            {isPremiumMember && currentMembership ? (
-              <section
-                onClick={() => setShowPremium(true)}
-                className="relative overflow-hidden bg-gradient-to-br from-emerald-600 to-primary p-6 rounded-2xl text-white shadow-lg cursor-pointer active:scale-[0.98] transition-transform"
-              >
-                <div className="absolute -top-6 -right-6 w-24 h-24 bg-white/10 rounded-full blur-2xl"></div>
-                <div className="relative z-10 flex justify-between items-start gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Star size={16} fill="currentColor" className="text-amber-300" />
-                      <span className="text-[10px] font-bold tracking-widest uppercase opacity-85">DuoDuo Pro</span>
-                    </div>
-                    <h3 className="text-lg font-bold">{t('settings.memberThanksTitle')}</h3>
-                    <p className="text-xs opacity-80">{t('settings.memberThanksDesc')}</p>
-                    <p className="text-xs opacity-90 pt-1">
-                      {t('settings.memberPlan')}: {getPlanLabel(currentMembership.plan)}
-                    </p>
-                    <p className="text-xs opacity-90">
-                      {t('settings.memberValidUntil')}: {formatMembershipExpiry(currentMembership)}
-                    </p>
-                  </div>
-                  <button className="bg-white text-emerald-700 px-4 py-2 rounded-xl text-xs font-bold shadow-sm whitespace-nowrap">
-                    {t('settings.manageMembership')}
-                  </button>
-                </div>
-              </section>
-            ) : (
-              <section
-                onClick={() => setShowPremium(true)}
-                className="relative overflow-hidden bg-gradient-to-br from-indigo-600 to-primary p-6 rounded-2xl text-white shadow-lg cursor-pointer active:scale-[0.98] transition-transform"
-              >
-                <div className="absolute -top-6 -right-6 w-24 h-24 bg-white/10 rounded-full blur-2xl"></div>
-                <div className="relative z-10 flex justify-between items-center">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Star size={16} fill="currentColor" className="text-amber-400" />
-                      <span className="text-[10px] font-bold tracking-widest uppercase opacity-80">DuoDuo Pro</span>
-                    </div>
-                    <h3 className="text-lg font-bold">{t('settings.upgradeTitle')}</h3>
-                    <p className="text-xs opacity-70">{t('settings.upgradeDesc')}</p>
-                  </div>
-                  <button className="bg-white text-primary px-4 py-2 rounded-xl text-xs font-bold shadow-sm">
-                    {t('settings.upgradeBtn')}
-                  </button>
-                </div>
-              </section>
-            )}
 
             {/* Settings Groups */}
             <div className="space-y-6">

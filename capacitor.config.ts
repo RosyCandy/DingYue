@@ -8,6 +8,9 @@ const config: CapacitorConfig = {
   appId: 'com.duoduo.app',
   appName: 'DuoDuo',
   webDir: 'dist',
+  // 给 WebView 一个应用底色：安卓键盘弹出触发 WebView 重绘故障时露出的是
+  // 页面底色而不是黑色（亮色主题的 surface 色，暗色主题由 CSS 覆盖）。
+  backgroundColor: '#f9f9fe',
   plugins: {
     CapacitorPasskey: {
       origin: process.env.PASSKEY_ORIGIN?.trim() || 'https://ngaasiu.studio',

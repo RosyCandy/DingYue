@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Search, BarChart2, AlertCircle, Clock, XCircle, Filter, RefreshCw, ChevronRight, FileText, User, LayoutGrid, Calendar, Plus, Trash2, Users } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, resolveAssetUrl } from '../lib/api';
 import { Subscription } from '../constants';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
@@ -324,7 +324,7 @@ export default function Subscriptions() {
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-container-low shrink-0 flex items-center justify-center">
                     {sub.icon ? (
-                        <img src={sub.icon} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                         <span className="text-xs font-bold text-primary uppercase">
                           {sub.name ? sub.name.charAt(0) : '?'}
