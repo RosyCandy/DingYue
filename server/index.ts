@@ -1473,7 +1473,7 @@ app.post('/api/auth/github', async (req, res) => {
 
 // POST /api/auth/gitee — Gitee OAuth 登录后回传 code
 app.post('/api/auth/gitee', async (req, res) => {
-  const { code } = req.body;
+  const { code, redirectUri } = req.body;
   if (!code) {
     return res.status(400).json({ error: '缺少 Gitee 登录 code' });
   }
@@ -1491,7 +1491,7 @@ app.post('/api/auth/gitee', async (req, res) => {
         code: String(code),
         client_id: clientId,
         client_secret: clientSecret,
-        redirect_uri: 'https://ngaasiu.studio/'
+        redirect_uri: redirectUri ? String(redirectUri) : 'https://ngaasiu.studio/'
       }).toString()
     });
     const tokenData: any = await tokenRes.json();

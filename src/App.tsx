@@ -13,7 +13,7 @@ import { useAuth } from './lib/auth';
 import LoginPage from './components/LoginPage';
 import { api, buildApiUrl, resolveAssetUrl } from './lib/api';
 import { useTheme } from './lib/theme';
-import { consumeSocialOAuthCallback, closeCzlLoginBrowser, SOCIAL_LOGIN_ERROR_KEY } from './lib/socialAuth';
+import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, SOCIAL_LOGIN_ERROR_KEY } from './lib/socialAuth';
 import { useAndroidBackButton } from './lib/backButton';
 import { App as CapApp } from '@capacitor/app';
 
@@ -38,32 +38,59 @@ export default function App() {
   );
 
   useEffect(() => {
-    // 安卓深链回调：微信 OAuth 授权后通过 duoduoapp://czl-callback 返回 App
+    // 原生深链回调：内置浏览器里的 CZL/GitHub/Gitee 授权完成后通过
+    // duoduoapp://czl-callback 或 duoduoapp://oauth-callback 返回 App
     const unsubscribe = CapApp.addListener('appUrlOpen', (event) => {
       try {
         const url = new URL(event.url);
-        if (url.host !== 'czl-callback') return;
         const code = url.searchParams.get('code');
         const state = url.searchParams.get('state');
-        void closeCzlLoginBrowser();
-        if (!code) return;
-        void (async () => {
-          try {
-            const res = await fetch(buildApiUrl('/auth/czl'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ code, redirectUri: `${window.location.origin}/` })
-            });
-            const data = await res.json();
-            if (res.ok) {
-              login(data.token, data.user);
-            } else {
-              sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, data.error || '微信登录失败');
+
+        if (url.host === 'czl-callback') {
+          void closeNativeLoginBrowser();
+          if (!code) return;
+          void (async () => {
+            try {
+              const res = await fetch(buildApiUrl('/auth/czl'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, redirectUri: `${window.location.origin}/` })
+              });
+              const data = await res.json();
+              if (res.ok) {
+                login(data.token, data.user);
+              } else {
+                sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, data.error || '微信登录失败');
+              }
+            } catch {
+              sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，微信登录失败');
             }
-          } catch {
-            sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，微信登录失败');
-          }
-        })();
+          })();
+          return;
+        }
+
+        if (url.host === 'oauth-callback') {
+          void closeNativeLoginBrowser();
+          const callback = consumeNativeOAuthCallback(code, state);
+          if (!callback) return;
+          void (async () => {
+            try {
+              const res = await fetch(buildApiUrl(`/auth/${callback.provider}`), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: callback.code, redirectUri: `${window.location.origin}/oauth-callback.html` })
+              });
+              const data = await res.json();
+              if (res.ok) {
+                login(data.token, data.user);
+              } else {
+                sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, data.error || '第三方登录失败');
+              }
+            } catch {
+              sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，第三方登录失败');
+            }
+          })();
+        }
       } catch {
         // ignore malformed app url open events
       }

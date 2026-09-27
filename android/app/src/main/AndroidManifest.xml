@@ -31,6 +31,14 @@
                 <data android:scheme="duoduoapp" android:host="czl-callback" />
             </intent-filter>
 
+            <!-- Deep link for GitHub/Gitee OAuth callback: duoduoapp://oauth-callback?code=xxx&state=xxx -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="duoduoapp" android:host="oauth-callback" />
+            </intent-filter>
+
         </activity>
 
         <provider

@@ -10,10 +10,11 @@ const QQ_APP_ID = import.meta.env.VITE_QQ_APP_ID || '';
 const GITHUB_APP_ID = import.meta.env.VITE_GITHUB_APP_ID || '';
 const GITEE_APP_ID = import.meta.env.VITE_GITEE_APP_ID || '';
 
-// CZL Connect 中继登录（connect.czl.net）：个人开发者绕过微信/QQ 企业认证的折衷方案。
+// CZL Connect 中继登录（connect.czl.net）：个人开发者绕过微信/QQ企业认证的折衷方案。
 // 授权发起在前端，code 换用户信息在后端 /api/auth/czl 完成。
+// 注意：这里只需要 client_id（公开标识，会进入授权 URL），绝不要把
+// client_secret 加 VITE_ 前缀暴露给前端，否则会被打包进公开的 JS 里。
 const CZL_CLIENT_ID = import.meta.env.VITE_CZL_CLIENT_ID || '';
-const CZL_CLIENT_SECRET = import.meta.env.VITE_CZL_CLIENT_SECRET || '';
 const CZL_BASE_URL = (import.meta.env.VITE_CZL_BASE_URL || 'https://connect.czl.net').replace(/\/+$/, '');
 
 // 微信 / QQ 的 OAuth 只实现了 Web 扫码流程；原生端没有可靠插件，先隐藏。
@@ -147,9 +148,10 @@ export function beginCzlLogin(): void {
   window.location.href = url;
 }
 
-// 授权成功后（duoduoapp://czl-callback 深链到达）应用侧调用，收起还开着的原生浏览器覆盖层。
-// 浏览器本来就没打开时 close() 会静默失败，因此吞掉异常即可。
-export async function closeCzlLoginBrowser(): Promise<void> {
+// 授权成功后（深链到达：duoduoapp://czl-callback 或 duoduoapp://oauth-callback）
+// 应用侧调用，收起还开着的原生浏览器覆盖层。浏览器本来就没打开时 close() 会
+// 静默失败，因此吞掉异常即可。
+export async function closeNativeLoginBrowser(): Promise<void> {
   if (!Capacitor.isNativePlatform()) return;
   try {
     await Browser.close();
@@ -158,28 +160,48 @@ export async function closeCzlLoginBrowser(): Promise<void> {
   }
 }
 
-// GitHub OAuth（标准授权码流程）
+// 兼容旧名字，避免其它地方还在用 closeCzlLoginBrowser 这个名字。
+export const closeCzlLoginBrowser = closeNativeLoginBrowser;
+
+// GitHub / Gitee 原生端授权回调统一走这个中转页 + 深链，见 public/oauth-callback.html。
+// redirect_uri 不带 query 参数，provider 信息通过 state 前缀（github_ / gitee_）识别，
+// 和 Web 端 consumeSocialOAuthCallback 用的是同一套规则。
+const nativeOAuthRedirectUri = (): string => `${window.location.origin}/oauth-callback.html`;
+
+// GitHub OAuth（标准授权码流程；原生端用内置浏览器 + 深链回调，见上面 CZL 的说明）
 export function beginGithubLogin(): void {
   if (!GITHUB_APP_ID) return;
+  const native = Capacitor.isNativePlatform();
   const params = new URLSearchParams({
     client_id: GITHUB_APP_ID,
-    redirect_uri: getRedirectUri(),
+    redirect_uri: native ? nativeOAuthRedirectUri() : getRedirectUri(),
     scope: 'read:user user:email',
     state: buildOAuthState('github')
   });
-  window.location.href = `https://github.com/login/oauth/authorize?${params.toString()}`;
+  const url = `https://github.com/login/oauth/authorize?${params.toString()}`;
+  if (native) {
+    void Browser.open({ url, presentationStyle: 'popover' });
+    return;
+  }
+  window.location.href = url;
 }
 
-// Gitee OAuth（标准授权码流程）
+// Gitee OAuth（标准授权码流程；原生端用内置浏览器 + 深链回调）
 export function beginGiteeLogin(): void {
   if (!GITEE_APP_ID) return;
+  const native = Capacitor.isNativePlatform();
   const params = new URLSearchParams({
     client_id: GITEE_APP_ID,
-    redirect_uri: getRedirectUri(),
+    redirect_uri: native ? nativeOAuthRedirectUri() : getRedirectUri(),
     scope: 'user_info',
     state: buildOAuthState('gitee')
   });
-  window.location.href = `https://gitee.com/oauth/authorize?${params.toString()}`;
+  const url = `https://gitee.com/oauth/authorize?${params.toString()}`;
+  if (native) {
+    void Browser.open({ url, presentationStyle: 'popover' });
+    return;
+  }
+  window.location.href = url;
 }
 
 export type SocialOAuthProvider = 'wechat' | 'qq' | 'czl' | 'github' | 'gitee';
@@ -187,6 +209,15 @@ export type SocialOAuthProvider = 'wechat' | 'qq' | 'czl' | 'github' | 'gitee';
 export type SocialOAuthCallback = {
   provider: SocialOAuthProvider;
   code: string;
+};
+
+const resolveProviderFromState = (state: string): SocialOAuthProvider | null => {
+  if (state.startsWith('wx_')) return 'wechat';
+  if (state.startsWith('qq_')) return 'qq';
+  if (state.startsWith('czl_')) return 'czl';
+  if (state.startsWith('github_')) return 'github';
+  if (state.startsWith('gitee_')) return 'gitee';
+  return null;
 };
 
 /**
@@ -199,17 +230,21 @@ export function consumeSocialOAuthCallback(): SocialOAuthCallback | null {
   const state = params.get('state');
   if (!code || !state) return null;
 
-  const provider: SocialOAuthProvider | null = state.startsWith('wx_')
-    ? 'wechat'
-    : state.startsWith('qq_')
-      ? 'qq'
-      : state.startsWith('czl_')
-        ? 'czl'
-        : state.startsWith('github_')
-          ? 'github'
-          : state.startsWith('gitee_')
-            ? 'gitee'
-            : null;
+  const provider = resolveProviderFromState(state);
+  const savedState = sessionStorage.getItem(OAUTH_STATE_KEY);
+  sessionStorage.removeItem(OAUTH_STATE_KEY);
+
+  if (!provider || savedState !== state) return null;
+  return { provider, code };
+}
+
+/**
+ * 原生端专用：duoduoapp://oauth-callback 深链到达时调用。provider 信息不走 query，
+ * 从 state 前缀（github_ / gitee_）识别，与 Web 端 consumeSocialOAuthCallback 同一套规则。
+ */
+export function consumeNativeOAuthCallback(code: string | null, state: string | null): SocialOAuthCallback | null {
+  if (!code || !state) return null;
+  const provider = resolveProviderFromState(state);
   const savedState = sessionStorage.getItem(OAUTH_STATE_KEY);
   sessionStorage.removeItem(OAUTH_STATE_KEY);
 
