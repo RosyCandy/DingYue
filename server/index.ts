@@ -932,7 +932,7 @@ const renderVerificationCodeEmailHtml = (code: string, purposeText: string) => `
     <tr>
       <td style="padding:30px 40px 36px;">
         <div style="border-top:1px solid #efe9f9;padding-top:20px;text-align:center;font-size:12px;color:#9d96ad;line-height:1.7;">
-          如需帮助，请联系 <a href="mailto:rosyhazes@126.com" style="color:#8f6bc8;">rosyhazes@126.com</a><br>
+          如需帮助，请联系 <a href="mailto:support@ngaasiu.studio" style="color:#8f6bc8;">support@ngaasiu.studio</a><br>
           请勿回复本邮件。
         </div>
       </td>
