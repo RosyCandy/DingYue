@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useI18n } from './lib/i18n';
 import { useAuth } from './lib/auth';
 import LoginPage from './components/LoginPage';
+import LandingPage from './components/LandingPage';
 import { api, buildApiUrl } from './lib/api';
 import { useTheme } from './lib/theme';
 import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, getOAuthCallbackUri, getCzlCallbackUri, SOCIAL_BIND_RESULT_KEY, SOCIAL_BIND_NAV_KEY, SOCIAL_LOGIN_ERROR_KEY, type SocialOAuthProvider } from './lib/socialAuth';
@@ -209,6 +210,18 @@ export default function App() {
     };
   }, [setLanguage, setTheme, user?.id]);
 
+  // 未登录时先展示产品落地页（介绍 + 下载），点「进入应用」后才是登录页；
+  // 会话内点过一次就不再重复出现
+  const [landingVisible, setLandingVisible] = useState(
+    () => !user && sessionStorage.getItem('landing_entered') !== '1'
+  );
+
+  const enterApp = () => {
+    sessionStorage.setItem('landing_entered', '1');
+    setLandingVisible(false);
+  };
+
+  if (!user && landingVisible) return <LandingPage onEnter={enterApp} />;
   if (!user) return <LoginPage />;
 
   const renderContent = () => {

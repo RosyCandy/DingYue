@@ -14,7 +14,9 @@
     "target": [
       {
         "target": "nsis",
-        "arch": ["x64"]
+        "arch": [
+          "x64"
+        ]
       }
     ],
     "artifactName": "DingYue-${version}-setup.${ext}"
@@ -28,7 +30,9 @@
     "target": [
       {
         "target": "dmg",
-        "arch": ["arm64"]
+        "arch": [
+          "arm64"
+        ]
       }
     ],
     "identity": null,
@@ -41,6 +45,7 @@
       "rpm"
     ],
     "category": "Utility",
-    "artifactName": "DingYue-${version}-${arch}.${ext}"
+    "artifactName": "DingYue-${version}-${arch}.${ext}",
+    "icon": "resources/icon-512.png"
   }
 }
