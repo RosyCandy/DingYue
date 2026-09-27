@@ -895,40 +895,44 @@ const CODE_PURPOSE_LABELS: Record<CodePurpose, string> = {
   change_email: '换绑邮箱'
 };
 
-// UniDAYS 风格的一次性验证码邮件：居中大号蓝色数字 + 品牌抬头，纯文本回退保留。
+// UniDAYS 风格的一次性验证码邮件：香芋紫渐变背景 + 白卡片 + 居中大号验证码，
+// 纯文本回退保留。渐变在不支持的客户端（如 Outlook）退化为 bgcolor 纯色。
 const renderVerificationCodeEmailHtml = (code: string, purposeText: string) => `
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:24px 12px;background:#f4f5f9;font-family:-apple-system,'PingFang SC','Helvetica Neue','Microsoft YaHei',sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;">
+<body style="margin:0;padding:28px 12px;background:#e9def8;background-image:linear-gradient(150deg,#eee4fb 0%,#ddccf6 45%,#cfc0f0 100%);font-family:-apple-system,'PingFang SC','Helvetica Neue','Microsoft YaHei',sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 8px 30px rgba(124,77,196,0.16);">
     <tr>
-      <td style="padding:32px 40px 8px;text-align:center;">
-        <div style="font-size:22px;font-weight:800;color:#0054cd;letter-spacing:0.5px;">DingYue 订阅管理助手</div>
+      <td bgcolor="#8f6bc8" style="background-image:linear-gradient(135deg,#a98be0 0%,#8f6bc8 60%,#7c55b8 100%);padding:30px 40px 26px;text-align:center;">
+        <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:0.5px;">DingYue 订阅管理助手</div>
+        <div style="font-size:12px;color:#e6dbf8;margin-top:6px;letter-spacing:2px;">SUBSCRIPTION MANAGER</div>
       </td>
     </tr>
     <tr>
-      <td style="padding:24px 40px 0;text-align:center;">
-        <div style="font-size:24px;font-weight:700;color:#1a1c1f;">${purposeText}验证码</div>
+      <td style="padding:30px 40px 0;text-align:center;">
+        <div style="font-size:23px;font-weight:700;color:#3c3350;">${purposeText}验证码</div>
       </td>
     </tr>
     <tr>
-      <td style="padding:20px 40px 8px;text-align:center;">
-        <div style="font-size:52px;font-weight:700;color:#0033cc;letter-spacing:14px;text-indent:14px;line-height:1.2;">${code}</div>
+      <td style="padding:22px 40px 8px;text-align:center;">
+        <div style="display:inline-block;background:#f4eefc;border-radius:16px;padding:18px 30px;">
+          <span style="font-size:50px;font-weight:700;color:#9a6fd0;letter-spacing:13px;text-indent:13px;line-height:1.15;">${code}</span>
+        </div>
       </td>
     </tr>
     <tr>
-      <td style="padding:12px 40px 8px;text-align:center;">
-        <div style="font-size:15px;color:#3c4049;line-height:1.7;">
+      <td style="padding:14px 40px 8px;text-align:center;">
+        <div style="font-size:15px;color:#5b5470;line-height:1.8;">
           这是你的${purposeText}验证码。<br>
           验证码 ${CODE_TTL_MINUTES} 分钟内有效。如果不是你本人操作，请忽略这封邮件。
         </div>
       </td>
     </tr>
     <tr>
-      <td style="padding:32px 40px 36px;">
-        <div style="border-top:1px solid #e6e8f0;padding-top:20px;text-align:center;font-size:12px;color:#8a8f9c;line-height:1.7;">
-          如需帮助，请联系 <a href="mailto:rosyhazes@126.com" style="color:#0054cd;">rosyhazes@126.com</a><br>
+      <td style="padding:30px 40px 36px;">
+        <div style="border-top:1px solid #efe9f9;padding-top:20px;text-align:center;font-size:12px;color:#9d96ad;line-height:1.7;">
+          如需帮助，请联系 <a href="mailto:rosyhazes@126.com" style="color:#8f6bc8;">rosyhazes@126.com</a><br>
           请勿回复本邮件。
         </div>
       </td>

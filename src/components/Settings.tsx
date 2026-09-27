@@ -12,6 +12,7 @@ import SocialLoginPage from './SocialLoginPage';
 import { useBackHandler } from '../lib/backButton';
 import { useAuth } from '../lib/auth';
 import { api, resolveAssetUrl, HelpArticle, LocalizedText, SecurityOverview, UserSettings } from '../lib/api';
+import { SOCIAL_BIND_NAV_KEY } from '../lib/socialAuth';
 import { registerPasskey, isPasskeyUserCancellation, isPasskeyAlreadyRegistered } from '../lib/passkey';
 import { version as appVersion } from '../../package.json';
 
@@ -26,7 +27,7 @@ const languageOptions: Array<{ value: Language; label: string }> = [
 const CONTACT_EMAIL = 'rosyhazes@126.com';
 
 // 站内导航：个人中心及其子页面在设置页内部切换（类似微信），不弹窗
-type SettingsView = 'main' | 'profile' | 'nickname' | 'email' | 'password' | 'passkey' | 'danger' | 'social';
+type SettingsView = 'main' | 'profile' | 'nickname' | 'email' | 'password' | 'passkey' | 'danger' | 'social' | 'help' | 'about';
 
 const VIEW_PARENT: Record<Exclude<SettingsView, 'main'>, SettingsView> = {
   profile: 'main',
@@ -36,6 +37,8 @@ const VIEW_PARENT: Record<Exclude<SettingsView, 'main'>, SettingsView> = {
   passkey: 'profile',
   danger: 'profile',
   social: 'profile',
+  help: 'main',
+  about: 'main',
 };
 
 export default function Settings() {
@@ -47,8 +50,6 @@ export default function Settings() {
   const [syncing, setSyncing] = useState(false);
   const [userSettings, setUserSettings] = useState<UserSettings | null>(null);
   const [profile, setProfile] = useState<{ name: string; avatar: string | null }>({ name: '', avatar: null });
-  const [showHelpModal, setShowHelpModal] = useState(false);
-  const [showAboutModal, setShowAboutModal] = useState(false);
   const [helpArticles, setHelpArticles] = useState<HelpArticle[]>([]);
   const [expandedArticleId, setExpandedArticleId] = useState<string | null>(null);
   const [auxLoading, setAuxLoading] = useState(false);
@@ -78,8 +79,6 @@ export default function Settings() {
 
   const goBack = () => setView(VIEW_PARENT[view]);
   useBackHandler(goBack, view !== 'main');
-  useBackHandler(() => setShowHelpModal(false), showHelpModal);
-  useBackHandler(() => setShowAboutModal(false), showAboutModal);
   useBackHandler(() => setShowLanguageSelect(false), showLanguageSelect);
 
   const pickLocalized = (text: LocalizedText): string =>
@@ -109,6 +108,13 @@ export default function Settings() {
 
   useEffect(() => {
     void loadSettings();
+    // 绑定第三方后 App 会写导航标记并切到设置页：直接进入第三方登录视图展示结果
+    if (sessionStorage.getItem(SOCIAL_BIND_NAV_KEY) === 'social') {
+      sessionStorage.removeItem(SOCIAL_BIND_NAV_KEY);
+      setActionNotice('');
+      setActionError('');
+      setView('social');
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -184,9 +190,11 @@ export default function Settings() {
   };
 
   const handleOpenHelp = async () => {
+    setActionNotice('');
+    setActionError('');
+    setExpandedArticleId(null);
+    setView('help');
     try {
-      setShowHelpModal(true);
-      setExpandedArticleId(null);
       setAuxLoading(true);
       const articles = await api.getHelpArticles();
       setHelpArticles(articles);
@@ -584,6 +592,72 @@ export default function Settings() {
       case 'social':
         return <SocialLoginPage onBack={goBack} />;
 
+      case 'help':
+        return (
+          <div>
+            <SubPageHeader title={t('settings.helpCenter')} onBack={goBack} />
+            {auxLoading ? (
+              <div className="py-12 flex justify-center text-on-surface-variant"><Loader2 size={20} className="animate-spin" /></div>
+            ) : (
+              <div className="space-y-3 pt-2">
+                {helpArticles.map((article) => {
+                  const expanded = expandedArticleId === article.id;
+                  return (
+                    <div key={article.id} className="bg-surface-container-low rounded-xl overflow-hidden">
+                      <button
+                        onClick={() => setExpandedArticleId(expanded ? null : article.id)}
+                        className="w-full text-left p-3 flex items-start justify-between gap-2 hover:bg-surface-container transition-colors"
+                      >
+                        <div>
+                          <p className="text-sm font-semibold text-on-surface">{pickLocalized(article.title)}</p>
+                          <p className="text-xs text-on-surface-variant mt-1">{pickLocalized(article.summary)}</p>
+                        </div>
+                        <ChevronDown size={16} className={cn('mt-1 shrink-0 text-on-surface-variant transition-transform', expanded && 'rotate-180')} />
+                      </button>
+                      {expanded && (
+                        <div className="px-3 pb-3 space-y-2">
+                          {(language === '简体中文' || language === '繁體中文' ? article.content.zh : article.content.en).map((paragraph, index) => (
+                            <p key={index} className="text-xs text-on-surface-variant leading-relaxed">· {paragraph}</p>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+                {helpArticles.length === 0 && (
+                  <p className="text-sm text-on-surface-variant px-1">{t('settings.noHelpContent')}</p>
+                )}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'about':
+        return (
+          <div>
+            <SubPageHeader title={t('settings.about')} onBack={goBack} />
+            <div className="pt-6 space-y-6">
+              {/* 用真实应用图标，与桌面/安装图标保持一致 */}
+              <div className="flex flex-col items-center gap-2 py-2">
+                <img src="icon.png" alt="DingYue" className="w-20 h-20 rounded-[22%] shadow-md bg-surface-container-low" />
+                <p className="text-lg font-black tracking-tight text-on-surface">DingYue</p>
+                <p className="text-xs text-on-surface-variant font-medium">v{appVersion}</p>
+                <p className="text-xs text-on-surface-variant text-center max-w-xs">{t('settings.aboutDesc')}</p>
+              </div>
+              <a
+                href={`mailto:${CONTACT_EMAIL}`}
+                className="flex items-center justify-between bg-surface-container-low rounded-xl p-3 hover:bg-surface-container transition-colors"
+              >
+                <span className="flex items-center gap-3 text-sm font-semibold text-on-surface">
+                  <Mail size={16} className="text-on-surface-variant" />
+                  {t('settings.contactUs')}
+                </span>
+                <span className="text-xs text-primary font-medium">{CONTACT_EMAIL}</span>
+              </a>
+            </div>
+          </div>
+        );
+
       default:
         return (
           <>
@@ -649,7 +723,7 @@ export default function Settings() {
 
               <SettingsGroup title={t('settings.support')}>
                 <SettingsItem icon={<HelpCircle size={18} />} label={t('settings.helpCenter')} onClick={() => void handleOpenHelp()} />
-                <SettingsItem icon={<Info size={18} />} label={t('settings.about')} onClick={() => setShowAboutModal(true)} />
+                <SettingsItem icon={<Info size={18} />} label={t('settings.about')} onClick={() => setView('about')} />
               </SettingsGroup>
             </div>
 
@@ -726,83 +800,6 @@ export default function Settings() {
                 </button>
               ))}
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Help Center Modal — 点击展开正文 */}
-      {showHelpModal && (
-        <div className="fixed inset-0 z-[85] bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-surface w-full max-w-md rounded-3xl p-6 space-y-4 max-h-[88vh] overflow-y-auto">
-            <div className="flex justify-between items-center">
-              <h3 className="font-bold text-lg text-on-surface">{t('settings.helpCenter')}</h3>
-              <button onClick={() => setShowHelpModal(false)} className="p-2 hover:bg-surface-container-high rounded-full transition-colors">
-                <X size={20} className="text-on-surface-variant" />
-              </button>
-            </div>
-            {auxLoading ? (
-              <div className="py-8 flex justify-center text-on-surface-variant"><Loader2 size={20} className="animate-spin" /></div>
-            ) : (
-              <div className="space-y-3">
-                {helpArticles.map((article) => {
-                  const expanded = expandedArticleId === article.id;
-                  return (
-                    <div key={article.id} className="bg-surface-container-low rounded-xl overflow-hidden">
-                      <button
-                        onClick={() => setExpandedArticleId(expanded ? null : article.id)}
-                        className="w-full text-left p-3 flex items-start justify-between gap-2 hover:bg-surface-container transition-colors"
-                      >
-                        <div>
-                          <p className="text-sm font-semibold text-on-surface">{pickLocalized(article.title)}</p>
-                          <p className="text-xs text-on-surface-variant mt-1">{pickLocalized(article.summary)}</p>
-                        </div>
-                        <ChevronDown size={16} className={cn('mt-1 shrink-0 text-on-surface-variant transition-transform', expanded && 'rotate-180')} />
-                      </button>
-                      {expanded && (
-                        <div className="px-3 pb-3 space-y-2">
-                          {(language === '简体中文' || language === '繁體中文' ? article.content.zh : article.content.en).map((paragraph, index) => (
-                            <p key={index} className="text-xs text-on-surface-variant leading-relaxed">· {paragraph}</p>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {helpArticles.length === 0 && (
-                  <p className="text-sm text-on-surface-variant">{t('settings.noHelpContent')}</p>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* About Modal */}
-      {showAboutModal && (
-        <div className="fixed inset-0 z-[85] bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-surface w-full max-w-sm rounded-3xl p-6 space-y-4">
-            <div className="flex justify-between items-center">
-              <h3 className="font-bold text-lg text-on-surface">{t('settings.about')}</h3>
-              <button onClick={() => setShowAboutModal(false)} className="p-2 hover:bg-surface-container-high rounded-full transition-colors">
-                <X size={20} className="text-on-surface-variant" />
-              </button>
-            </div>
-            <div className="flex flex-col items-center gap-2 py-3">
-              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center text-primary text-2xl font-black">D</div>
-              <p className="text-lg font-black tracking-tight text-on-surface">DingYue</p>
-              <p className="text-xs text-on-surface-variant font-medium">v{appVersion}</p>
-              <p className="text-xs text-on-surface-variant text-center">{t('settings.aboutDesc')}</p>
-            </div>
-            <a
-              href={`mailto:${CONTACT_EMAIL}`}
-              className="flex items-center justify-between bg-surface-container-low rounded-xl p-3 hover:bg-surface-container transition-colors"
-            >
-              <span className="flex items-center gap-3 text-sm font-semibold text-on-surface">
-                <Mail size={16} className="text-on-surface-variant" />
-                {t('settings.contactUs')}
-              </span>
-              <span className="text-xs text-primary font-medium">{CONTACT_EMAIL}</span>
-            </a>
           </div>
         </div>
       )}

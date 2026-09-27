@@ -4,13 +4,57 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>DingYue</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Manrope:wght@600;700;800&family=Playfair+Display:ital,wght@1,600&display=swap" rel="stylesheet">
+    <!-- 字体已在 src/index.css 自托管（/fonts/*.woff2），不再请求 fonts.googleapis.com：
+         大陆网络下该域名不可达，<head> 里的样式表会阻塞首屏导致长时间白屏 -->
+    <style>
+      /* JS 加载完成前的品牌加载骨架：大陆/弱网下把“白屏等待”变成可感知的启动页 */
+      #boot-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 9999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        background: #f9f9fe;
+        font-family: -apple-system, "PingFang SC", "MiSans", "Microsoft YaHei", sans-serif;
+      }
+      #boot-splash .boot-logo {
+        width: 56px;
+        height: 56px;
+        border-radius: 15px;
+        background: linear-gradient(135deg, #316ee9, #0054cd);
+        color: #fff;
+        font-size: 30px;
+        font-weight: 800;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      #boot-splash .boot-name {
+        font-size: 14px;
+        font-weight: 700;
+        color: #1a1c1f;
+      }
+      #boot-splash .boot-spinner {
+        width: 22px;
+        height: 22px;
+        border: 3px solid #e0e4f0;
+        border-top-color: #0054cd;
+        border-radius: 50%;
+        animation: boot-spin 0.8s linear infinite;
+      }
+      @keyframes boot-spin { to { transform: rotate(360deg); } }
+    </style>
   </head>
   <body>
+    <div id="boot-splash">
+      <div class="boot-logo">D</div>
+      <div class="boot-name">DingYue 订阅管理助手</div>
+      <div class="boot-spinner"></div>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

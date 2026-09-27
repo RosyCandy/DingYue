@@ -13,14 +13,18 @@ import { useAuth } from './lib/auth';
 import LoginPage from './components/LoginPage';
 import { api, buildApiUrl } from './lib/api';
 import { useTheme } from './lib/theme';
-import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, getOAuthCallbackUri, getCzlCallbackUri, SOCIAL_BIND_RESULT_KEY, SOCIAL_LOGIN_ERROR_KEY, type SocialOAuthProvider } from './lib/socialAuth';
+import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, getOAuthCallbackUri, getCzlCallbackUri, SOCIAL_BIND_RESULT_KEY, SOCIAL_BIND_NAV_KEY, SOCIAL_LOGIN_ERROR_KEY, type SocialOAuthProvider } from './lib/socialAuth';
 import { useAndroidBackButton } from './lib/backButton';
 import { App as CapApp } from '@capacitor/app';
 
 type Tab = 'dashboard' | 'subscriptions' | 'statistics' | 'settings';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  // 绑定第三方账号后从 OAuth 跳回时（带 SOCIAL_BIND_NAV_KEY），直接落在设置页，
+  // 由 Settings 继续进入第三方登录视图展示绑定结果；标记由 Settings 消费后移除
+  const [activeTab, setActiveTab] = useState<Tab>(() =>
+    sessionStorage.getItem(SOCIAL_BIND_NAV_KEY) === 'social' ? 'settings' : 'dashboard'
+  );
   const [showAddModal, setShowAddModal] = useState(false);
   const [showWalletModal, setShowWalletModal] = useState(false);
   const { t, setLanguage } = useI18n();
@@ -56,6 +60,8 @@ export default function App() {
               if (callback.bind) {
                 await api.bindSocialProvider('wechat', callback.code, getCzlCallbackUri());
                 sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({ ok: true }));
+                sessionStorage.setItem(SOCIAL_BIND_NAV_KEY, 'social');
+                setActiveTab('settings');
                 return;
               }
               const res = await fetch(buildApiUrl('/auth/czl'), {
@@ -70,10 +76,13 @@ export default function App() {
                 sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, data.error || '微信登录失败');
               }
             } catch (err) {
-              sessionStorage.setItem(
-                callback.bind ? SOCIAL_BIND_RESULT_KEY : SOCIAL_LOGIN_ERROR_KEY,
-                callback.bind ? JSON.stringify({ ok: false, message: err instanceof Error ? err.message : '绑定失败' }) : '网络异常，微信登录失败'
-              );
+              if (callback.bind) {
+                sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({ ok: false, message: err instanceof Error ? err.message : '绑定失败' }));
+                sessionStorage.setItem(SOCIAL_BIND_NAV_KEY, 'social');
+                setActiveTab('settings');
+              } else {
+                sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，微信登录失败');
+              }
             }
           })();
           return;
@@ -88,6 +97,8 @@ export default function App() {
               if (callback.bind) {
                 await api.bindSocialProvider(callback.provider === 'gitee' ? 'gitee' : 'github', callback.code, getOAuthCallbackUri());
                 sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({ ok: true }));
+                sessionStorage.setItem(SOCIAL_BIND_NAV_KEY, 'social');
+                setActiveTab('settings');
                 return;
               }
               const res = await fetch(buildApiUrl(`/auth/${callback.provider}`), {
@@ -102,10 +113,13 @@ export default function App() {
                 sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, data.error || '第三方登录失败');
               }
             } catch (err) {
-              sessionStorage.setItem(
-                callback.bind ? SOCIAL_BIND_RESULT_KEY : SOCIAL_LOGIN_ERROR_KEY,
-                callback.bind ? JSON.stringify({ ok: false, message: err instanceof Error ? err.message : '绑定失败' }) : '网络异常，第三方登录失败'
-              );
+              if (callback.bind) {
+                sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({ ok: false, message: err instanceof Error ? err.message : '绑定失败' }));
+                sessionStorage.setItem(SOCIAL_BIND_NAV_KEY, 'social');
+                setActiveTab('settings');
+              } else {
+                sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，第三方登录失败');
+              }
             }
           })();
         }
@@ -134,6 +148,8 @@ export default function App() {
           if (provider === 'qq') throw new Error('暂不支持绑定该方式');
           await api.bindSocialProvider(provider, callback.code, webRedirectUri(callback.provider));
           sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({ ok: true }));
+          sessionStorage.setItem(SOCIAL_BIND_NAV_KEY, 'social');
+          setActiveTab('settings');
           return;
         }
         const res = await fetch(buildApiUrl(`/auth/${callback.provider}`), {
@@ -153,6 +169,8 @@ export default function App() {
             ok: false,
             message: err instanceof Error ? err.message : '绑定失败'
           }));
+          sessionStorage.setItem(SOCIAL_BIND_NAV_KEY, 'social');
+          setActiveTab('settings');
         } else {
           sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，第三方登录失败');
         }

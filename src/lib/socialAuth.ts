@@ -91,6 +91,8 @@ const OAUTH_STATE_KEY = 'social_oauth_state';
 export const SOCIAL_LOGIN_ERROR_KEY = 'social_login_error';
 // 绑定流程（登录后）的结果，第三方登录页挂载时读取展示
 export const SOCIAL_BIND_RESULT_KEY = 'social_bind_result';
+// 绑定流程结束后让应用自动切到 设置→第三方登录 视图（替代“回到首页自己找”的糟糕体验）
+export const SOCIAL_BIND_NAV_KEY = 'social_bind_nav';
 
 // prefix 支持 'github' / 'gitee' / 'czl' / 'wx' / 'qq'，以及 'bind_' 前缀的绑定流程
 const buildOAuthState = (prefix: string): string => {

@@ -25,3 +25,8 @@ createRoot(document.getElementById('root')!).render(
     </GoogleOAuthProvider>
   </StrictMode>,
 );
+
+// 首帧渲染完成后移除 index.html 里的启动骨架（弱网下它替代白屏，加载慢时保持可见）
+requestAnimationFrame(() => {
+  document.getElementById('boot-splash')?.remove();
+});
