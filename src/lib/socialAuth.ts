@@ -127,17 +127,13 @@ export function beginQqLogin(): void {
 }
 
 // CZL Connect 中继登录，upstream_providers=wechat 把授权页限定为微信入口。
-// 统一使用中转页接收 CZL 回调：App 端通过深链 duoduoapp://czl-callback 返回，
-// Web 端通过中转页回退到站点首页由 useEffect 消费 code。
+// 统一使用中转页接收 CZL 回调：App 端通过中转页回 App，Web 端通过中转页回退到站点首页。
 //
-// 原生端分两种情况：
-//  - Android：微信授权页（qrconnect）只做客户端 UA 检测，CZL 的授权页在移动 UA 下
-//    会把用户带到“仅微信内可用”的 H5 授权地址，导致「请在微信客户端打开链接」死路。
-//    因此整条 CZL→微信流程直接在 App 自己的 WebView 里完成（capacitor.config.ts 已把
-//    WebView UA 覆盖为桌面 Chrome 并 allowNavigation 放行 CZL/微信域名），微信展示
-//    桌面版二维码，用户截图/另一台设备扫码后流程原路回到 App。返回不再依赖深链：
-//    中转页识别 UA 里的 DingYueNative 标记后直接导航回 App origin。
-//  - iOS：仍用内置浏览器（SFSafariViewController）+ 深链返回。
+// 原生端（安卓/iOS）都直接在 App 自己的主 WebView 里完成整条 CZL→微信流程：
+// capacitor.config.ts 已把 WebView UA 覆盖为桌面浏览器（带 DingYueNative 标记）并
+// allowNavigation 放行 CZL/微信域名，微信展示桌面版二维码（截图/另一台设备扫码），
+// 扫码完成后中转页识别标记直接导航回 App origin。iOS 早期走 SFSafariViewController
+// + 移动 UA，会撞上微信「请在微信客户端打开链接」的限制，现已统一为主 WebView 方案。
 export function beginCzlLogin(bind = false): void {
   if (!CZL_CLIENT_ID) return;
   const redirectUri = getCzlCallbackUri();
@@ -150,15 +146,8 @@ export function beginCzlLogin(bind = false): void {
     upstream_providers: 'wechat'
   });
   const url = `${CZL_BASE_URL}/oauth2/authorize?${params.toString()}`;
-  if (Capacitor.isNativePlatform()) {
-    if (Capacitor.getPlatform() === 'android') {
-      // 主 WebView 加载外部域名：UA 已是桌面版，CZL/微信域名在 allowNavigation 白名单里
-      window.location.href = url;
-      return;
-    }
-    void Browser.open({ url, presentationStyle: 'popover' });
-    return;
-  }
+  // 主 WebView 加载外部域名：UA 已是桌面版，CZL/微信域名在 allowNavigation 白名单里；
+  // Web 端同样是整页跳转，无需分支
   window.location.href = url;
 }
 
