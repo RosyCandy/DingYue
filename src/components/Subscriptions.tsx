@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, BarChart2, AlertCircle, Clock, XCircle, Filter, RefreshCw, ChevronRight, FileText, User, LayoutGrid, Calendar, Plus, Trash2, Users } from 'lucide-react';
+import { Search, BarChart2, AlertCircle, Check, Clock, XCircle, Filter, RefreshCw, ChevronRight, FileText, User, LayoutGrid, Calendar, Plus, Trash2, Users } from 'lucide-react';
 import { api, resolveAssetUrl } from '../lib/api';
 import { Subscription } from '../constants';
 import { cn } from '../lib/utils';
@@ -190,31 +190,33 @@ export default function Subscriptions() {
             )}
           </div>
 
-          {/* 账户下拉筛选：默认登录邮箱，可添加账户 */}
+          {/* 账户下拉筛选：按钮固定显示「账户详情」，具体账户在下拉中选择（选中项带绿勾） */}
           <div className="relative">
             <FilterButton
               icon={<Users size={14} />}
-              label={account === '__all__' ? t('subs.allAccounts') : account}
+              label={t('subs.accountDetails')}
               onClick={() => { setShowAccountDropdown((v) => !v); setShowCategoryDropdown(false); }}
             />
             {showAccountDropdown && (
               <div className="absolute top-full left-0 mt-2 w-56 bg-surface-container-lowest border border-outline-variant/10 rounded-xl shadow-xl z-50 p-2">
                 <button
                   onClick={() => { setSelectedAccount('__all__'); setShowAccountDropdown(false); }}
-                  className="w-full text-left px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm"
+                  className="w-full flex items-center justify-between gap-2 text-left px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm"
                 >
-                  {t('subs.allAccounts')}
+                  <span className="truncate">{t('subs.allAccounts')}</span>
+                  {account === '__all__' && <Check size={14} className="shrink-0 text-green-500" />}
                 </button>
                 {accountOptions.map((option) => (
                   <button
                     key={option}
                     onClick={() => { setSelectedAccount(option); setShowAccountDropdown(false); }}
                     className={cn(
-                      "w-full text-left px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm truncate",
+                      "w-full flex items-center justify-between gap-2 text-left px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm",
                       option === account && "text-primary font-bold"
                     )}
                   >
-                    {option}
+                    <span className="truncate">{option}</span>
+                    {option === account && <Check size={14} className="shrink-0 text-green-500" />}
                   </button>
                 ))}
                 <div className="border-t border-outline-variant/10 mt-1 pt-2 flex items-center gap-1 px-1">

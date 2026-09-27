@@ -895,14 +895,14 @@ const CODE_PURPOSE_LABELS: Record<CodePurpose, string> = {
   change_email: '换绑邮箱'
 };
 
-// UniDAYS 风格的一次性验证码邮件：香芋紫渐变背景 + 白卡片 + 居中大号验证码，
+// UniDAYS 风格的一次性验证码邮件：白色背景 + 白卡片（紫色渐变品牌头 + 浅紫底托验证码），
 // 纯文本回退保留。渐变在不支持的客户端（如 Outlook）退化为 bgcolor 纯色。
 const renderVerificationCodeEmailHtml = (code: string, purposeText: string) => `
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="margin:0;padding:28px 12px;background:#e9def8;background-image:linear-gradient(150deg,#eee4fb 0%,#ddccf6 45%,#cfc0f0 100%);font-family:-apple-system,'PingFang SC','Helvetica Neue','Microsoft YaHei',sans-serif;">
-  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:20px;overflow:hidden;box-shadow:0 8px 30px rgba(124,77,196,0.16);">
+<body style="margin:0;padding:28px 12px;background:#ffffff;font-family:-apple-system,'PingFang SC','Helvetica Neue','Microsoft YaHei',sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ece6f7;border-radius:20px;overflow:hidden;box-shadow:0 6px 24px rgba(124,77,196,0.12);">
     <tr>
       <td bgcolor="#8f6bc8" style="background-image:linear-gradient(135deg,#a98be0 0%,#8f6bc8 60%,#7c55b8 100%);padding:30px 40px 26px;text-align:center;">
         <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:0.5px;">DingYue 订阅管理助手</div>
