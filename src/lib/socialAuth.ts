@@ -1,6 +1,7 @@
 import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import { AppleSignIn, SignInScope, ErrorCode } from '@capawesome/capacitor-apple-sign-in';
+import { SITE_ORIGIN } from './api';
 
 // 各登录方式的可用性由环境变量开关（VITE_APPLE_CLIENT_ID / VITE_WECHAT_APP_ID / VITE_QQ_APP_ID）。
 // 未配置时登录页自动隐藏对应按钮，避免出现点了必然失败的入口。
@@ -124,14 +125,17 @@ export function beginQqLogin(): void {
 // 统一使用中转页接收 CZL 回调：App 端通过深链 duoduoapp://czl-callback 返回，
 // Web 端通过中转页回退到站点首页由 useEffect 消费 code。
 //
-// 原生端（安卓/iOS）不用 window.location.href 整页跳转：Capacitor 会把这类跳转
-// 交给系统浏览器处理，导致应用整体切出到 Chrome/Safari，体验割裂，还容易撞上
-// 微信「请在微信客户端打开链接」的限制。改用系统内置浏览器（Custom Tabs /
-// SFSafariViewController）以覆盖层形式打开授权页，用户仍停留在 App 内，关闭
-// 或授权完成后通过 duoduoapp://czl-callback 深链自动收起，体验更接近“点一下就登录”。
+// 原生端分两种情况：
+//  - Android：微信授权页（qrconnect）只做客户端 UA 检测，CZL 的授权页在移动 UA 下
+//    会把用户带到“仅微信内可用”的 H5 授权地址，导致「请在微信客户端打开链接」死路。
+//    因此整条 CZL→微信流程直接在 App 自己的 WebView 里完成（capacitor.config.ts 已把
+//    WebView UA 覆盖为桌面 Chrome 并 allowNavigation 放行 CZL/微信域名），微信展示
+//    桌面版二维码，用户截图/另一台设备扫码后流程原路回到 App。返回不再依赖深链：
+//    中转页识别 UA 里的 DingYueNative 标记后直接导航回 App origin。
+//  - iOS：仍用内置浏览器（SFSafariViewController）+ 深链返回。
 export function beginCzlLogin(): void {
   if (!CZL_CLIENT_ID) return;
-  const redirectUri = `${window.location.origin}/czl-callback.html`;
+  const redirectUri = getCzlCallbackUri();
   const params = new URLSearchParams({
     response_type: 'code',
     client_id: CZL_CLIENT_ID,
@@ -142,6 +146,11 @@ export function beginCzlLogin(): void {
   });
   const url = `${CZL_BASE_URL}/oauth2/authorize?${params.toString()}`;
   if (Capacitor.isNativePlatform()) {
+    if (Capacitor.getPlatform() === 'android') {
+      // 主 WebView 加载外部域名：UA 已是桌面版，CZL/微信域名在 allowNavigation 白名单里
+      window.location.href = url;
+      return;
+    }
     void Browser.open({ url, presentationStyle: 'popover' });
     return;
   }
@@ -166,20 +175,31 @@ export const closeCzlLoginBrowser = closeNativeLoginBrowser;
 // GitHub / Gitee 原生端授权回调统一走这个中转页 + 深链，见 public/oauth-callback.html。
 // redirect_uri 不带 query 参数，provider 信息通过 state 前缀（github_ / gitee_）识别，
 // 和 Web 端 consumeSocialOAuthCallback 用的是同一套规则。
-const nativeOAuthRedirectUri = (): string => `${window.location.origin}/oauth-callback.html`;
+//
+// GitHub/Gitee 都要求 authorize 的 redirect_uri 与开发者后台注册的回调地址完全一致，
+// 且原生端 window.location.origin 是 WebView 内部地址（https://localhost），不能作为
+// 回调。因此 Web 端和原生端统一使用站点公网域名下的中转页 /oauth-callback.html：
+// 原生端由中转页唤起 duoduoapp://oauth-callback 深链回 App，Web 端由它回退到首页消费 code。
+// ⚠️ GitHub / Gitee 开发者后台的回调地址必须配置为 {SITE_ORIGIN}/oauth-callback.html。
+const oauthCallbackUri = (): string => `${SITE_ORIGIN}/oauth-callback.html`;
+
+/** CZL Connect 的注册回调地址（需与 CZL 开发者后台配置一致）。 */
+export const getCzlCallbackUri = (): string => `${SITE_ORIGIN}/czl-callback.html`;
+
+/** GitHub / Gitee OAuth 的统一回调地址（需与对应平台开发者后台配置一致）。 */
+export const getOAuthCallbackUri = oauthCallbackUri;
 
 // GitHub OAuth（标准授权码流程；原生端用内置浏览器 + 深链回调，见上面 CZL 的说明）
 export function beginGithubLogin(): void {
   if (!GITHUB_APP_ID) return;
-  const native = Capacitor.isNativePlatform();
   const params = new URLSearchParams({
     client_id: GITHUB_APP_ID,
-    redirect_uri: native ? nativeOAuthRedirectUri() : getRedirectUri(),
+    redirect_uri: oauthCallbackUri(),
     scope: 'read:user user:email',
     state: buildOAuthState('github')
   });
   const url = `https://github.com/login/oauth/authorize?${params.toString()}`;
-  if (native) {
+  if (Capacitor.isNativePlatform()) {
     void Browser.open({ url, presentationStyle: 'popover' });
     return;
   }
@@ -187,17 +207,19 @@ export function beginGithubLogin(): void {
 }
 
 // Gitee OAuth（标准授权码流程；原生端用内置浏览器 + 深链回调）
+// 注意 response_type=code 必传：Gitee 不像 GitHub 会默认按 code 处理，
+// 缺了会报「服务器不支持这种 response type」。
 export function beginGiteeLogin(): void {
   if (!GITEE_APP_ID) return;
-  const native = Capacitor.isNativePlatform();
   const params = new URLSearchParams({
     client_id: GITEE_APP_ID,
-    redirect_uri: native ? nativeOAuthRedirectUri() : getRedirectUri(),
+    redirect_uri: oauthCallbackUri(),
+    response_type: 'code',
     scope: 'user_info',
     state: buildOAuthState('gitee')
   });
   const url = `https://gitee.com/oauth/authorize?${params.toString()}`;
-  if (native) {
+  if (Capacitor.isNativePlatform()) {
     void Browser.open({ url, presentationStyle: 'popover' });
     return;
   }

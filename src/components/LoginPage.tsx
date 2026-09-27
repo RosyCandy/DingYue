@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Fingerprint } from 'lucide-react';
+import { Fingerprint, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { buildApiUrl } from '../lib/api';
 import { GoogleLogin } from '@react-oauth/google';
@@ -39,6 +39,7 @@ export default function LoginPage() {
     const [codeSending, setCodeSending] = useState(false);
     const [countdown, setCountdown] = useState(0);
     const [passkeyLoading, setPasskeyLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
     const native = isNativePlatform();
 
     const wechatAvailable = isWechatLoginAvailable();
@@ -80,20 +81,20 @@ export default function LoginPage() {
         setLoading(true);
         try {
             if (mode === 'login') {
-                const res = await fetch('/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+                const res = await fetch(buildApiUrl('/auth/login'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
                 const data = await res.json();
                 if (!res.ok) return setError(data.error || '登录失败');
                 login(data.token, data.user);
                 return;
             }
             if (mode === 'register') {
-                const res = await fetch('/api/auth/register', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, name, code }) });
+                const res = await fetch(buildApiUrl('/auth/register'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password, name, code }) });
                 const data = await res.json();
                 if (!res.ok) return setError(data.error || '注册失败');
                 login(data.token, data.user);
                 return;
             }
-            const res = await fetch('/api/auth/reset-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code, newPassword }) });
+            const res = await fetch(buildApiUrl('/auth/reset-password'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, code, newPassword }) });
             const data = await res.json();
             if (!res.ok) return setError(data.error || '密码重置失败');
             setNotice('密码已重置，请使用新密码登录');
@@ -114,7 +115,7 @@ export default function LoginPage() {
         setCodeSending(true);
         try {
             const purpose = mode === 'forgot' ? 'reset_password' : 'register';
-            const res = await fetch('/api/auth/send-code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim(), purpose }) });
+            const res = await fetch(buildApiUrl('/auth/send-code'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim(), purpose }) });
             const data = await res.json();
             if (!res.ok) return setError(data.error || '验证码发送失败');
             if (data.devCode) {
@@ -213,14 +214,21 @@ export default function LoginPage() {
                            placeholder="邮箱" type="email" autoComplete="email" value={email}
                            onChange={e => setEmail(e.target.value)} />
                     {mode !== 'forgot' && (
-                        <input className="w-full px-4 py-3 rounded-xl bg-surface-container-low outline-none text-sm"
-                               placeholder="密码" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                               value={password} onChange={e => setPassword(e.target.value)} />
+                        <div className="relative">
+                            <input className="w-full px-4 py-3 pr-12 rounded-xl bg-surface-container-low outline-none text-sm"
+                                   placeholder="密码" type={showPassword ? 'text' : 'password'}
+                                   autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                                   value={password} onChange={e => setPassword(e.target.value)} />
+                            <PasswordVisibilityButton visible={showPassword} onToggle={() => setShowPassword(v => !v)} />
+                        </div>
                     )}
                     {mode === 'forgot' && (
-                        <input className="w-full px-4 py-3 rounded-xl bg-surface-container-low outline-none text-sm"
-                               placeholder="新密码（至少 6 位）" type="password" autoComplete="new-password"
-                               value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                        <div className="relative">
+                            <input className="w-full px-4 py-3 pr-12 rounded-xl bg-surface-container-low outline-none text-sm"
+                                   placeholder="新密码（至少 6 位）" type={showPassword ? 'text' : 'password'} autoComplete="new-password"
+                                   value={newPassword} onChange={e => setNewPassword(e.target.value)} />
+                            <PasswordVisibilityButton visible={showPassword} onToggle={() => setShowPassword(v => !v)} />
+                        </div>
                     )}
 
                     {mode !== 'login' && (
@@ -335,6 +343,16 @@ function SocialButton({ label, onClick, disabled, children }: { label: string; o
         <button onClick={onClick} disabled={disabled} aria-label={label}
                 className="w-12 h-12 flex items-center justify-center rounded-full border border-outline-variant/30 bg-white active:scale-95 transition-all disabled:opacity-50">
             {children}
+        </button>
+    );
+}
+
+function PasswordVisibilityButton({ visible, onToggle }: { visible: boolean; onToggle: () => void }) {
+    return (
+        <button type="button" onClick={onToggle}
+                aria-label={visible ? '隐藏密码' : '显示密码'}
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-full text-on-surface-variant active:scale-90 transition-all">
+            {visible ? <EyeOff size={17} /> : <Eye size={17} />}
         </button>
     );
 }

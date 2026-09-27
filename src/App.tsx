@@ -13,7 +13,7 @@ import { useAuth } from './lib/auth';
 import LoginPage from './components/LoginPage';
 import { api, buildApiUrl, resolveAssetUrl } from './lib/api';
 import { useTheme } from './lib/theme';
-import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, SOCIAL_LOGIN_ERROR_KEY } from './lib/socialAuth';
+import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, getOAuthCallbackUri, getCzlCallbackUri, SOCIAL_LOGIN_ERROR_KEY, type SocialOAuthProvider } from './lib/socialAuth';
 import { useAndroidBackButton } from './lib/backButton';
 import { App as CapApp } from '@capacitor/app';
 
@@ -54,7 +54,7 @@ export default function App() {
               const res = await fetch(buildApiUrl('/auth/czl'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code, redirectUri: `${window.location.origin}/` })
+                body: JSON.stringify({ code, redirectUri: getCzlCallbackUri() })
               });
               const data = await res.json();
               if (res.ok) {
@@ -78,7 +78,7 @@ export default function App() {
               const res = await fetch(buildApiUrl(`/auth/${callback.provider}`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: callback.code, redirectUri: `${window.location.origin}/oauth-callback.html` })
+                body: JSON.stringify({ code: callback.code, redirectUri: getOAuthCallbackUri() })
               });
               const data = await res.json();
               if (res.ok) {
@@ -99,15 +99,21 @@ export default function App() {
   }, [login]);
 
   useEffect(() => {
-    // 微信 / QQ 网页版扫码登录会跳转离开应用再带 code 回来，在这里完成换 token
+    // 微信 / QQ / GitHub / Gitee 网页版扫码登录会跳转离开应用再带 code 回来，在这里完成换 token。
+    // 换 token 的 redirectUri 必须和发起授权时一致（Gitee/CZL 会校验），按 provider 对应。
     const callback = consumeSocialOAuthCallback();
     if (!callback) return;
+    const webRedirectUri = (provider: SocialOAuthProvider): string => {
+      if (provider === 'czl') return getCzlCallbackUri();
+      if (provider === 'github' || provider === 'gitee') return getOAuthCallbackUri();
+      return `${window.location.origin}/`;
+    };
     void (async () => {
       try {
         const res = await fetch(buildApiUrl(`/auth/${callback.provider}`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: callback.code, redirectUri: `${window.location.origin}/` })
+          body: JSON.stringify({ code: callback.code, redirectUri: webRedirectUri(callback.provider) })
         });
         const data = await res.json();
         if (res.ok) {

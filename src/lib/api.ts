@@ -27,6 +27,11 @@ const API_ORIGIN = API_URL.startsWith('http')
   ? API_URL.replace(/^(https?:\/\/[^/]+).*/, '$1')
   : '';
 
+// 站点公网 origin：原生端 window.location.origin 是 WebView 内部地址（https://localhost），
+// 不能用于 OAuth 回调地址；原生构建时 API 地址一定是绝对地址，直接取其 origin，
+// 网页端则用当前站点 origin。
+export const SITE_ORIGIN: string = API_ORIGIN || window.location.origin;
+
 export const resolveAssetUrl = (url: string | null | undefined): string => {
   if (!url) return '';
   if (!url.startsWith('/')) return url;

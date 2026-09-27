@@ -29,16 +29,27 @@
       location.href = fallback;
       return;
     }
-    // 优先尝试深链返回 App（provider 信息已经编码在 state 前缀里，见 socialAuth.ts）；
-    // 失败后回退到站点首页让 Web 端消费 code
-    var scheme = 'duoduoapp://oauth-callback?code=' + encodeURIComponent(code);
-    if (state) scheme += '&state=' + encodeURIComponent(state);
-    var timeout = setTimeout(function () {
-      var origin = location.origin;
-      location.href = origin + '/?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state || '');
-    }, 1500);
-    location.href = scheme;
-    setTimeout(function () { clearTimeout(timeout); }, 400);
+    var ua = navigator.userAgent;
+    var toHome = function () {
+      location.href = location.origin + '/?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state || '');
+    };
+    // 正在 App 自己的 WebView 里（UA 带 DingYueNative 标记，见 capacitor.config.ts）：
+    // 直接导航回应用入口，把 code 交给 React 应用消费（与 czl-callback.html 同一套规则）。
+    if (ua.indexOf('DingYueNative') !== -1) {
+      var appOrigin = ua.indexOf('Macintosh') !== -1 ? 'capacitor://localhost' : 'https://localhost';
+      location.replace(appOrigin + '/?code=' + encodeURIComponent(code) + '&state=' + encodeURIComponent(state || ''));
+      return;
+    }
+    if (/Android|iPhone|iPad|Mobile/i.test(ua)) {
+      // 移动端内置浏览器：优先尝试深链返回 App，未安装 App 时 1.5s 后回退站点首页。
+      var scheme = 'duoduoapp://oauth-callback?code=' + encodeURIComponent(code);
+      if (state) scheme += '&state=' + encodeURIComponent(state);
+      setTimeout(toHome, 1500);
+      location.href = scheme;
+      return;
+    }
+    // 桌面浏览器无法唤起 App，直接回首页消费 code
+    toHome();
   })();
 </script>
 </body>
