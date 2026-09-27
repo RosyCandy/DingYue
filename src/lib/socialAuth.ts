@@ -89,8 +89,11 @@ const OAUTH_STATE_KEY = 'social_oauth_state';
 
 // OAuth 跳转后回到应用时，如果登录失败，通过 sessionStorage 把错误带给登录页展示
 export const SOCIAL_LOGIN_ERROR_KEY = 'social_login_error';
+// 绑定流程（登录后）的结果，第三方登录页挂载时读取展示
+export const SOCIAL_BIND_RESULT_KEY = 'social_bind_result';
 
-const buildOAuthState = (prefix: 'wx' | 'qq' | 'czl' | 'github' | 'gitee'): string => {
+// prefix 支持 'github' / 'gitee' / 'czl' / 'wx' / 'qq'，以及 'bind_' 前缀的绑定流程
+const buildOAuthState = (prefix: string): string => {
   const state = `${prefix}_${crypto.randomUUID()}`;
   sessionStorage.setItem(OAUTH_STATE_KEY, state);
   return state;
@@ -133,7 +136,7 @@ export function beginQqLogin(): void {
 //    桌面版二维码，用户截图/另一台设备扫码后流程原路回到 App。返回不再依赖深链：
 //    中转页识别 UA 里的 DingYueNative 标记后直接导航回 App origin。
 //  - iOS：仍用内置浏览器（SFSafariViewController）+ 深链返回。
-export function beginCzlLogin(): void {
+export function beginCzlLogin(bind = false): void {
   if (!CZL_CLIENT_ID) return;
   const redirectUri = getCzlCallbackUri();
   const params = new URLSearchParams({
@@ -141,7 +144,7 @@ export function beginCzlLogin(): void {
     client_id: CZL_CLIENT_ID,
     redirect_uri: redirectUri,
     scope: 'read',
-    state: buildOAuthState('czl'),
+    state: buildOAuthState(bind ? 'bind_czl' : 'czl'),
     upstream_providers: 'wechat'
   });
   const url = `${CZL_BASE_URL}/oauth2/authorize?${params.toString()}`;
@@ -190,13 +193,13 @@ export const getCzlCallbackUri = (): string => `${SITE_ORIGIN}/czl-callback.html
 export const getOAuthCallbackUri = oauthCallbackUri;
 
 // GitHub OAuth（标准授权码流程；原生端用内置浏览器 + 深链回调，见上面 CZL 的说明）
-export function beginGithubLogin(): void {
+export function beginGithubLogin(bind = false): void {
   if (!GITHUB_APP_ID) return;
   const params = new URLSearchParams({
     client_id: GITHUB_APP_ID,
     redirect_uri: oauthCallbackUri(),
     scope: 'read:user user:email',
-    state: buildOAuthState('github')
+    state: buildOAuthState(bind ? 'bind_github' : 'github')
   });
   const url = `https://github.com/login/oauth/authorize?${params.toString()}`;
   if (Capacitor.isNativePlatform()) {
@@ -209,14 +212,14 @@ export function beginGithubLogin(): void {
 // Gitee OAuth（标准授权码流程；原生端用内置浏览器 + 深链回调）
 // 注意 response_type=code 必传：Gitee 不像 GitHub 会默认按 code 处理，
 // 缺了会报「服务器不支持这种 response type」。
-export function beginGiteeLogin(): void {
+export function beginGiteeLogin(bind = false): void {
   if (!GITEE_APP_ID) return;
   const params = new URLSearchParams({
     client_id: GITEE_APP_ID,
     redirect_uri: oauthCallbackUri(),
     response_type: 'code',
     scope: 'user_info',
-    state: buildOAuthState('gitee')
+    state: buildOAuthState(bind ? 'bind_gitee' : 'gitee')
   });
   const url = `https://gitee.com/oauth/authorize?${params.toString()}`;
   if (Capacitor.isNativePlatform()) {
@@ -231,6 +234,8 @@ export type SocialOAuthProvider = 'wechat' | 'qq' | 'czl' | 'github' | 'gitee';
 export type SocialOAuthCallback = {
   provider: SocialOAuthProvider;
   code: string;
+  // true 表示这是「登录后绑定第三方账号」流程，回调应走 /api/auth/bind/* 而不是登录
+  bind: boolean;
 };
 
 const resolveProviderFromState = (state: string): SocialOAuthProvider | null => {
@@ -240,6 +245,16 @@ const resolveProviderFromState = (state: string): SocialOAuthProvider | null => 
   if (state.startsWith('github_')) return 'github';
   if (state.startsWith('gitee_')) return 'gitee';
   return null;
+};
+
+// state 前缀同时编码 provider 与动作（登录 / 绑定）：bind_github_xxx / github_xxx
+const resolveStateInfo = (state: string): { provider: SocialOAuthProvider; bind: boolean } | null => {
+  if (state.startsWith('bind_')) {
+    const provider = resolveProviderFromState(state.slice('bind_'.length));
+    return provider ? { provider, bind: true } : null;
+  }
+  const provider = resolveProviderFromState(state);
+  return provider ? { provider, bind: false } : null;
 };
 
 /**
@@ -252,12 +267,12 @@ export function consumeSocialOAuthCallback(): SocialOAuthCallback | null {
   const state = params.get('state');
   if (!code || !state) return null;
 
-  const provider = resolveProviderFromState(state);
+  const info = resolveStateInfo(state);
   const savedState = sessionStorage.getItem(OAUTH_STATE_KEY);
   sessionStorage.removeItem(OAUTH_STATE_KEY);
 
-  if (!provider || savedState !== state) return null;
-  return { provider, code };
+  if (!info || savedState !== state) return null;
+  return { provider: info.provider, code, bind: info.bind };
 }
 
 /**
@@ -266,10 +281,10 @@ export function consumeSocialOAuthCallback(): SocialOAuthCallback | null {
  */
 export function consumeNativeOAuthCallback(code: string | null, state: string | null): SocialOAuthCallback | null {
   if (!code || !state) return null;
-  const provider = resolveProviderFromState(state);
+  const info = resolveStateInfo(state);
   const savedState = sessionStorage.getItem(OAUTH_STATE_KEY);
   sessionStorage.removeItem(OAUTH_STATE_KEY);
 
-  if (!provider || savedState !== state) return null;
-  return { provider, code };
+  if (!info || savedState !== state) return null;
+  return { provider: info.provider, code, bind: info.bind };
 }

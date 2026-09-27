@@ -58,9 +58,12 @@ export default function Settings() {
   // 安全与隐私
   const [securityOverview, setSecurityOverview] = useState<SecurityOverview | null>(null);
   const [securityLoading, setSecurityLoading] = useState(false);
-  const [emailInput, setEmailInput] = useState('');
+  // 换绑邮箱：新邮箱 + 验证码
+  const [newEmailInput, setNewEmailInput] = useState('');
+  const [emailCode, setEmailCode] = useState('');
+  const [sendingEmailCode, setSendingEmailCode] = useState(false);
+  const [emailCodeCountdown, setEmailCodeCountdown] = useState(0);
   const [savingEmail, setSavingEmail] = useState(false);
-  const [unlinkingGoogle, setUnlinkingGoogle] = useState(false);
   const [currentPasswordInput, setCurrentPasswordInput] = useState('');
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
@@ -119,7 +122,6 @@ export default function Settings() {
         const data = await api.getSecurityOverview();
         if (!active) return;
         setSecurityOverview(data);
-        setEmailInput(data.email);
       } catch (err) {
         if (active) setActionError(err instanceof Error ? err.message : 'Failed to load security info');
       } finally {
@@ -266,37 +268,57 @@ export default function Settings() {
     }
   };
 
-  const handleSaveEmail = async () => {
-    const email = emailInput.trim();
+  // 换绑邮箱验证码倒计时
+  useEffect(() => {
+    if (emailCodeCountdown <= 0) return;
+    const timer = setTimeout(() => setEmailCodeCountdown((value) => value - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [emailCodeCountdown]);
+
+  const handleSendEmailCode = async () => {
+    const email = newEmailInput.trim();
+    setActionError('');
+    setActionNotice('');
+    if (!email || !email.includes('@')) {
+      setActionError(t('settings.invalidEmail'));
+      return;
+    }
+    try {
+      setSendingEmailCode(true);
+      const data = await api.requestEmailCode(email, 'change_email');
+      if (data.devCode) {
+        setEmailCode(data.devCode);
+        setActionNotice(`Dev code: ${data.devCode}`);
+      } else {
+        setActionNotice(t('settings.codeSent'));
+      }
+      setEmailCodeCountdown(60);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to send code');
+    } finally {
+      setSendingEmailCode(false);
+    }
+  };
+
+  const handleChangeEmail = async () => {
+    const email = newEmailInput.trim();
     if (!email || !email.includes('@')) return;
+    if (!emailCode.trim()) {
+      setActionError(t('settings.emailCodeRequired'));
+      return;
+    }
     try {
       setSavingEmail(true);
       setActionError('');
-      const session = await api.updateSecurityEmail(email);
+      const session = await api.updateSecurityEmail(email, emailCode.trim());
       applySession(session, profile.avatar);
       setSecurityOverview((prev) => (prev ? { ...prev, email: session.user.email } : prev));
-      setActionNotice(t('settings.profileSaved'));
+      setActionNotice(t('settings.emailUpdated'));
       goBack();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to update email');
     } finally {
       setSavingEmail(false);
-    }
-  };
-
-  const handleUnlinkGoogle = async () => {
-    if (!securityOverview?.googleLinked) return;
-    if (!securityOverview.hasPassword) return;
-    if (!window.confirm(t('settings.confirmUnlinkGoogle'))) return;
-    try {
-      setUnlinkingGoogle(true);
-      setActionError('');
-      const updated = await api.unlinkGoogleAccount();
-      setSecurityOverview(updated);
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to unlink Google account');
-    } finally {
-      setUnlinkingGoogle(false);
     }
   };
 
@@ -383,7 +405,7 @@ export default function Settings() {
                   <ListRow
                     label={t('settings.securityEmail')}
                     value={securityOverview.email}
-                    onClick={() => { setEmailInput(securityOverview.email); setView('email'); }}
+                    onClick={() => { setNewEmailInput(''); setEmailCode(''); setView('email'); }}
                   />
                   <ListRow
                     label={t('settings.securityPassword')}
@@ -395,14 +417,6 @@ export default function Settings() {
                     value={String(securityOverview.passkeyCount)}
                     onClick={() => setView('passkey')}
                   />
-                  <ListRow
-                    label={t('settings.securityGoogle')}
-                    value={securityOverview.googleLinked ? t('settings.securityLinked') : t('settings.securityNotLinked')}
-                    onClick={() => void handleUnlinkGoogle()}
-                  />
-                  {securityOverview.googleLinked && !securityOverview.hasPassword && (
-                    <p className="text-xs text-amber-600 px-2 pt-2">{t('settings.needPasswordBeforeUnlink')}</p>
-                  )}
                   <ListRow
                     label={t('settings.socialLogin')}
                     value={t('settings.socialLoginDesc')}
@@ -444,23 +458,50 @@ export default function Settings() {
       case 'email':
         return (
           <div>
-            <SubPageHeader title={t('settings.securityEmail')} onBack={goBack} />
+            <SubPageHeader title={t('settings.changeEmail')} onBack={goBack} />
             <div className="space-y-3 pt-2">
+              <p className="text-xs text-on-surface-variant px-1">
+                {t('settings.currentEmail')}：{securityOverview?.email || user?.email || '—'}
+              </p>
               <input
                 type="email"
-                value={emailInput}
-                onChange={(e) => setEmailInput(e.target.value)}
-                placeholder={t('settings.securityEmailPlaceholder')}
+                value={newEmailInput}
+                onChange={(e) => setNewEmailInput(e.target.value)}
+                placeholder={t('settings.newEmailPlaceholder')}
                 className="w-full bg-surface-container-low border border-outline-variant/10 rounded-xl px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
               />
-              {actionError && <p className="text-xs text-red-500">{actionError}</p>}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  value={emailCode}
+                  onChange={(e) => setEmailCode(e.target.value.replace(/\D/g, ''))}
+                  placeholder={t('settings.emailCodePlaceholder')}
+                  className="flex-1 min-w-0 bg-surface-container-low border border-outline-variant/10 rounded-xl px-3 py-3 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                />
+                <button
+                  onClick={() => void handleSendEmailCode()}
+                  disabled={sendingEmailCode || emailCodeCountdown > 0}
+                  className="shrink-0 px-3 py-3 rounded-xl border border-outline-variant/30 text-xs font-bold text-primary active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100"
+                >
+                  {sendingEmailCode
+                    ? t('settings.processing')
+                    : emailCodeCountdown > 0
+                      ? t('settings.resendIn').replace('{s}', String(emailCodeCountdown))
+                      : t('settings.sendCode')}
+                </button>
+              </div>
+              {actionNotice && <p className="text-xs text-primary px-1">{actionNotice}</p>}
+              {actionError && <p className="text-xs text-red-500 px-1">{actionError}</p>}
               <button
-                onClick={() => void handleSaveEmail()}
+                onClick={() => void handleChangeEmail()}
                 disabled={savingEmail}
                 className="w-full bg-primary text-white px-3 py-3 rounded-xl text-sm font-bold disabled:opacity-70 active:scale-[0.98] transition-transform"
               >
-                {savingEmail ? t('settings.processing') : t('settings.saveEmail')}
+                {savingEmail ? t('settings.processing') : t('settings.changeEmail')}
               </button>
+              <p className="text-xs text-on-surface-variant/70 px-1 leading-relaxed">{t('settings.changeEmailDesc')}</p>
             </div>
           </div>
         );
@@ -620,7 +661,7 @@ export default function Settings() {
 
             {/* 版本号跟随 package.json 的 version 字段 */}
             <p className="text-center text-[10px] text-on-surface-variant font-medium opacity-40">
-              DuoDuo v{appVersion}
+              DingYue v{appVersion}
             </p>
           </>
         );

@@ -295,9 +295,9 @@ export default function LoginPage() {
                                 </SocialButton>
                             ) : (
                                 <GoogleLogin
+                                    type="icon"
                                     shape="circle"
                                     size="large"
-                                    width={48}
                                     logo_alignment="center"
                                     onSuccess={async ({ credential }) => {
                                         if (credential) await sendCredentialToBackend(credential);

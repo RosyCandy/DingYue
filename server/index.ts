@@ -93,7 +93,7 @@ if (!smtpConfigured) {
 // 通行密钥（Passkey / WebAuthn）：rpID 必须与访问域名一致（本地开发是 localhost），
 // 生产环境请在 .env 设置 PASSKEY_RP_ID=ngaasiu.studio 和 PASSKEY_EXPECTED_ORIGINS。
 const PASSKEY_RP_ID = process.env.PASSKEY_RP_ID || 'localhost';
-const PASSKEY_RP_NAME = process.env.PASSKEY_RP_NAME || 'DuoDuo';
+const PASSKEY_RP_NAME = process.env.PASSKEY_RP_NAME || 'DingYue';
 const PASSKEY_EXPECTED_ORIGINS = [
   ...(process.env.PASSKEY_EXPECTED_ORIGINS || `http://localhost:3000,https://${PASSKEY_RP_ID}`)
     .split(',')
@@ -513,7 +513,12 @@ async function ensureDatabaseSchema() {
       ? userColumns.map((row: { COLUMN_NAME: string }) => row.COLUMN_NAME)
       : []
   );
-  for (const column of ['apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id', 'avatar']) {
+  for (const column of [
+    'apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id', 'avatar',
+    // 第三方账号的展示名（绑定状态页显示用户名用）
+    'apple_name', 'wechat_name', 'qq_name', 'czl_name', 'github_name', 'gitee_name',
+    'google_name'
+  ]) {
     if (!userColumnNames.has(column)) {
       await pool.execute(`ALTER TABLE users ADD COLUMN ${column} VARCHAR(255) NULL`);
     }
@@ -532,7 +537,7 @@ async function ensureDatabaseSchema() {
     CREATE TABLE IF NOT EXISTS email_verification_codes (
       id BIGINT AUTO_INCREMENT PRIMARY KEY,
       email VARCHAR(255) NOT NULL,
-      purpose ENUM('register', 'reset_password') NOT NULL,
+      purpose ENUM('register', 'reset_password', 'change_email') NOT NULL,
       code_hash VARCHAR(255) NOT NULL,
       expires_at DATETIME NOT NULL,
       used_at DATETIME NULL,
@@ -540,6 +545,11 @@ async function ensureDatabaseSchema() {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_verification_codes_email_purpose (email, purpose)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+  // 已存在的表扩展 purpose 枚举（换绑邮箱验证码）
+  await pool.execute(`
+    ALTER TABLE email_verification_codes
+    MODIFY purpose ENUM('register', 'reset_password', 'change_email') NOT NULL
   `);
 
   // Passkey (WebAuthn) credentials.
@@ -847,16 +857,23 @@ const syncSubscriptionNotifications = async (userId: number) => {
 // Email Verification Codes
 // ─────────────────────────────────────────────
 
-const CODE_PURPOSES = ['register', 'reset_password'] as const;
+const CODE_PURPOSES = ['register', 'reset_password', 'change_email'] as const;
 type CodePurpose = typeof CODE_PURPOSES[number];
 const CODE_TTL_MINUTES = 10;
 const CODE_MAX_ATTEMPTS = 5;
 const CODE_SEND_COOLDOWN_MS = 60 * 1000;
 const CODE_HOURLY_LIMIT = 5;
 
-// 微信 / QQ / Apple 匿名用户没有真实邮箱，用占位邮箱满足 users.email 的唯一约束。
+// 微信 / QQ / Apple / CZL / GitHub / Gitee 匿名用户没有真实邮箱，用占位邮箱满足 users.email 的唯一约束。
 // 占位邮箱不能用于收验证码，找回密码接口会显式拒绝。
-const EMAIL_PLACEHOLDER_DOMAINS = ['@wechat.placeholder', '@qq.placeholder', '@apple.placeholder', '@czl.placeholder'];
+const EMAIL_PLACEHOLDER_DOMAINS = [
+  '@wechat.placeholder',
+  '@qq.placeholder',
+  '@apple.placeholder',
+  '@czl.placeholder',
+  '@github.placeholder',
+  '@gitee.placeholder'
+];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const normalizeEmail = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -872,16 +889,65 @@ const createPlaceholderEmail = (prefix: string, providerId: string, domain: stri
   return `${prefix}_${digest}${domain}`;
 };
 
+const CODE_PURPOSE_LABELS: Record<CodePurpose, string> = {
+  register: '注册',
+  reset_password: '密码重置',
+  change_email: '换绑邮箱'
+};
+
+// UniDAYS 风格的一次性验证码邮件：居中大号蓝色数字 + 品牌抬头，纯文本回退保留。
+const renderVerificationCodeEmailHtml = (code: string, purposeText: string) => `
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:24px 12px;background:#f4f5f9;font-family:-apple-system,'PingFang SC','Helvetica Neue','Microsoft YaHei',sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;">
+    <tr>
+      <td style="padding:32px 40px 8px;text-align:center;">
+        <div style="font-size:22px;font-weight:800;color:#0054cd;letter-spacing:0.5px;">DingYue 订阅管理助手</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:24px 40px 0;text-align:center;">
+        <div style="font-size:24px;font-weight:700;color:#1a1c1f;">${purposeText}验证码</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:20px 40px 8px;text-align:center;">
+        <div style="font-size:52px;font-weight:700;color:#0033cc;letter-spacing:14px;text-indent:14px;line-height:1.2;">${code}</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:12px 40px 8px;text-align:center;">
+        <div style="font-size:15px;color:#3c4049;line-height:1.7;">
+          这是你的${purposeText}验证码。<br>
+          验证码 ${CODE_TTL_MINUTES} 分钟内有效。如果不是你本人操作，请忽略这封邮件。
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:32px 40px 36px;">
+        <div style="border-top:1px solid #e6e8f0;padding-top:20px;text-align:center;font-size:12px;color:#8a8f9c;line-height:1.7;">
+          如需帮助，请联系 <a href="mailto:rosyhazes@126.com" style="color:#0054cd;">rosyhazes@126.com</a><br>
+          请勿回复本邮件。
+        </div>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
 const sendVerificationCodeEmail = async (email: string, code: string, purpose: CodePurpose) => {
-  const purposeText = purpose === 'register' ? '注册' : '密码重置';
-  const subject = `【DuoDuo】${purposeText}验证码`;
-  const text = `你的 DuoDuo ${purposeText}验证码是：${code}\n\n验证码 ${CODE_TTL_MINUTES} 分钟内有效。如果不是你本人操作，请忽略这封邮件。`;
+  const purposeText = CODE_PURPOSE_LABELS[purpose];
+  const subject = `【DingYue】${purposeText}验证码`;
+  const text = `你的 DingYue ${purposeText}验证码是：${code}\n\n验证码 ${CODE_TTL_MINUTES} 分钟内有效。如果不是你本人操作，请忽略这封邮件。`;
+  const html = renderVerificationCodeEmailHtml(code, purposeText);
 
   if (!mailer) {
     console.log(`[dev] ${purposeText}验证码 ${email}: ${code}`);
     return;
   }
-  await mailer.sendMail({ from: SMTP_FROM, to: email, subject, text });
+  await mailer.sendMail({ from: SMTP_FROM, to: email, subject, text, html });
 };
 
 const sendVerificationCode = async (email: string, purpose: CodePurpose): Promise<{ devCode?: string }> => {
@@ -952,7 +1018,7 @@ const consumeVerificationCode = async (email: string, purpose: CodePurpose, code
 // Social Login Helpers (Apple / WeChat / QQ)
 // ─────────────────────────────────────────────
 
-const SOCIAL_PROVIDER_COLUMNS = ['apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id'] as const;
+const SOCIAL_PROVIDER_COLUMNS = ['google_id', 'apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id'] as const;
 type SocialProviderColumn = typeof SOCIAL_PROVIDER_COLUMNS[number];
 
 const findOrCreateSocialUser = async ({
@@ -970,6 +1036,10 @@ const findOrCreateSocialUser = async ({
   placeholderPrefix: string;
   placeholderDomain: string;
 }) => {
+  // 每个第三方渠道有配套的展示名列（google_name / github_name / ...），绑定状态页展示用户名用
+  const nameColumn = providerColumn.replace(/_id$/, '_name');
+  const displayName = name || '用户';
+
   const [byProvider]: any = await pool.execute(
     `SELECT * FROM users WHERE ${providerColumn} = ? LIMIT 1`,
     [providerId]
@@ -980,17 +1050,19 @@ const findOrCreateSocialUser = async ({
     // 已有同邮箱账户（例如邮箱注册用户）时直接关联该第三方账号
     const [byEmail]: any = await pool.execute('SELECT * FROM users WHERE email = ? LIMIT 1', [email]);
     if (byEmail?.[0]) {
-      await pool.execute(`UPDATE users SET ${providerColumn} = ? WHERE id = ?`, [providerId, byEmail[0].id]);
-      return { ...byEmail[0], [providerColumn]: providerId };
+      await pool.execute(
+        `UPDATE users SET ${providerColumn} = ?, ${nameColumn} = ? WHERE id = ?`,
+        [providerId, displayName, byEmail[0].id]
+      );
+      return { ...byEmail[0], [providerColumn]: providerId, [nameColumn]: displayName };
     }
   }
 
   const placeholderEmail = createPlaceholderEmail(placeholderPrefix, providerId, placeholderDomain);
-  const displayName = name || '用户';
   try {
     await pool.execute(
-      `INSERT INTO users (email, name, ${providerColumn}) VALUES (?, ?, ?)`,
-      [placeholderEmail, displayName, providerId]
+      `INSERT INTO users (email, name, ${providerColumn}, ${nameColumn}) VALUES (?, ?, ?, ?)`,
+      [placeholderEmail, displayName, providerId, displayName]
     );
   } catch (e: any) {
     // 并发登录时可能撞唯一索引，重查一次
@@ -1001,6 +1073,153 @@ const findOrCreateSocialUser = async ({
     [providerId]
   );
   return created[0];
+};
+
+// ── 第三方 code 换用户信息（登录与绑定共用） ─────────────────
+
+type SocialProfile = {
+  id: string;
+  name: string;
+  email: string | null;
+  providerColumn: SocialProviderColumn;
+};
+
+const exchangeGithubProfile = async (code: string): Promise<SocialProfile> => {
+  const clientId = process.env.GITHUB_APP_ID || '';
+  const clientSecret = process.env.GITHUB_APP_SECRET || '';
+  if (!clientId || !clientSecret) {
+    throw Object.assign(new Error('GitHub 登录暂未配置，请联系管理员'), { status: 501 });
+  }
+  // Accept: application/json 必传 —— GitHub 换 token 接口默认返回表单编码
+  const tokenRes = await directFetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      code: String(code)
+    }).toString()
+  });
+  const tokenData: any = await tokenRes.json();
+  if (!tokenData.access_token) {
+    throw new Error(tokenData.error_description || tokenData.error || '无效 code');
+  }
+  // GitHub API 强制要求 User-Agent 头，缺失时可能直接 403
+  const userRes = await directFetch('https://api.github.com/user', {
+    headers: {
+      Authorization: `Bearer ${tokenData.access_token}`,
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'DingYue-App'
+    }
+  });
+  const profile: any = await userRes.json();
+  if (!profile?.id) {
+    throw new Error('无法获取用户信息');
+  }
+  return {
+    id: String(profile.id),
+    name: String(profile.name || profile.login || 'GitHub用户').trim(),
+    email: typeof profile.email === 'string' && profile.email.includes('@') ? normalizeEmail(profile.email) : null,
+    providerColumn: 'github_id'
+  };
+};
+
+const exchangeGiteeProfile = async (code: string, redirectUri?: string): Promise<SocialProfile> => {
+  const clientId = process.env.GITEE_APP_ID || '';
+  const clientSecret = process.env.GITEE_APP_SECRET || '';
+  if (!clientId || !clientSecret) {
+    throw Object.assign(new Error('Gitee 登录暂未配置，请联系管理员'), { status: 501 });
+  }
+  const tokenRes = await directFetch('https://gitee.com/oauth/token', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: String(code),
+      client_id: clientId,
+      client_secret: clientSecret,
+      redirect_uri: redirectUri ? String(redirectUri) : 'https://ngaasiu.studio/'
+    }).toString()
+  });
+  const tokenData: any = await tokenRes.json();
+  if (!tokenData.access_token) {
+    throw new Error(tokenData.error_description || tokenData.error || '无效 code');
+  }
+  const userRes = await directFetch('https://gitee.com/api/v5/user?access_token=' + encodeURIComponent(tokenData.access_token));
+  const profile: any = await userRes.json();
+  if (!profile?.id) {
+    throw new Error('无法获取用户信息');
+  }
+  return {
+    id: String(profile.id),
+    name: String(profile.name || profile.login || 'Gitee用户').trim(),
+    email: typeof profile.email === 'string' && profile.email.includes('@') ? normalizeEmail(profile.email) : null,
+    providerColumn: 'gitee_id'
+  };
+};
+
+const exchangeCzlProfile = async (code: string, redirectUri?: string): Promise<SocialProfile> => {
+  if (!CZL_CLIENT_ID || !CZL_CLIENT_SECRET) {
+    throw Object.assign(new Error('该登录方式暂未配置，请联系管理员'), { status: 501 });
+  }
+  const tokenRes = await directFetch(`${CZL_BASE_URL}/api/oauth2/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: String(code),
+      client_id: CZL_CLIENT_ID,
+      client_secret: CZL_CLIENT_SECRET,
+      ...(redirectUri ? { redirect_uri: String(redirectUri) } : {})
+    }).toString()
+  });
+  const tokenData: any = await tokenRes.json();
+  if (!tokenData.access_token) {
+    throw new Error(tokenData.error_description || tokenData.error || '无效 code');
+  }
+  const infoRes = await directFetch(`${CZL_BASE_URL}/api/oauth2/userinfo`, {
+    headers: { Authorization: `Bearer ${tokenData.access_token}` }
+  });
+  const profile: any = await infoRes.json();
+  if (!profile?.id) {
+    throw new Error('无法获取用户信息');
+  }
+  // CZL 返回的邮箱不一定已验证，只有明确 verified 才允许按邮箱关联已有账户，
+  // 否则视为匿名用户走占位邮箱，避免恶意抢绑他人邮箱账户。
+  const verifiedEmail =
+    profile.email_verified === true && typeof profile.email === 'string' && profile.email.includes('@')
+      ? normalizeEmail(profile.email)
+      : null;
+  return {
+    id: String(profile.id),
+    name: String(profile.nickname || profile.username || '').trim() || '微信用户',
+    email: verifiedEmail,
+    providerColumn: 'czl_id'
+  };
+};
+
+// 绑定第三方账号到当前用户：占用检查 + 写入 id 与展示名
+const bindSocialAccount = async (
+  userId: number,
+  providerColumn: SocialProviderColumn,
+  providerId: string,
+  displayName: string
+) => {
+  const nameColumn = providerColumn.replace(/_id$/, '_name');
+  const [takenRows]: any = await pool.execute(
+    `SELECT id FROM users WHERE ${providerColumn} = ? AND id <> ? LIMIT 1`,
+    [providerId, userId]
+  );
+  if (Array.isArray(takenRows) && takenRows.length > 0) {
+    throw Object.assign(
+      new Error('该第三方账号已绑定其他 DingYue 账号，请先前往那个账号的「第三方登录」页解绑，或换绑其他账号'),
+      { status: 409 }
+    );
+  }
+  await pool.execute(
+    `UPDATE users SET ${providerColumn} = ?, ${nameColumn} = ? WHERE id = ?`,
+    [providerId, displayName, userId]
+  );
 };
 
 type AppleJwk = { kid: string; kty: string; n: string; e: string };
@@ -1060,10 +1279,12 @@ app.post('/api/auth/send-code', async (req, res) => {
     return res.status(400).json({ error: '请输入有效的邮箱地址' });
   }
   try {
-    if (purpose === 'register') {
+    if (purpose === 'register' || purpose === 'change_email') {
+      // 注册 / 换绑邮箱：目标邮箱必须是「未注册」的
       const [rows]: any = await pool.execute('SELECT id FROM users WHERE email = ? LIMIT 1', [email]);
       if (Array.isArray(rows) && rows.length > 0) {
-        return res.status(400).json({ error: '该邮箱已注册，请直接登录' });
+        const reason = purpose === 'register' ? '该邮箱已注册，请直接登录' : '该邮箱已绑定其他 DingYue 账号，请换一个邮箱';
+        return res.status(400).json({ error: reason });
       }
     } else {
       const [rows]: any = await pool.execute('SELECT id, password_hash, google_id, apple_id, wechat_id, qq_id FROM users WHERE email = ? LIMIT 1', [email]);
@@ -1204,14 +1425,14 @@ app.post('/api/auth/google', async (req, res) => {
     let user = rows[0];
     if (!user) {
       await pool.execute(
-          'INSERT INTO users (email, name, google_id) VALUES (?, ?, ?)',
-          [email, name, googleId]
+          'INSERT INTO users (email, name, google_id, google_name) VALUES (?, ?, ?, ?)',
+          [email, name, googleId, name]
       );
       const [newRows]: any = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
       user = newRows[0];
     } else if (!user.google_id) {
       // 已存在的邮箱/密码账户首次使用 Google 登录时，补充关联 google_id
-      await pool.execute('UPDATE users SET google_id = ? WHERE id = ?', [googleId, user.id]);
+      await pool.execute('UPDATE users SET google_id = ?, google_name = ? WHERE id = ?', [googleId, name, user.id]);
       user.google_id = googleId;
     }
     res.json(buildAuthResponse(user));
@@ -1364,47 +1585,13 @@ app.post('/api/auth/czl', async (req, res) => {
   if (!code) {
     return res.status(400).json({ error: '缺少登录 code' });
   }
-  if (!CZL_CLIENT_ID || !CZL_CLIENT_SECRET) {
-    return res.status(501).json({ error: '该登录方式暂未配置，请联系管理员' });
-  }
   try {
-    const tokenRes = await directFetch(`${CZL_BASE_URL}/api/oauth2/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code: String(code),
-        client_id: CZL_CLIENT_ID,
-        client_secret: CZL_CLIENT_SECRET,
-        ...(redirectUri ? { redirect_uri: String(redirectUri) } : {})
-      }).toString()
-    });
-    const tokenData: any = await tokenRes.json();
-    if (!tokenData.access_token) {
-      const reason = tokenData.error_description || tokenData.error || '无效 code';
-      return res.status(400).json({ error: '登录失败: ' + reason });
-    }
-
-    const infoRes = await directFetch(`${CZL_BASE_URL}/api/oauth2/userinfo`, {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` }
-    });
-    const profile: any = await infoRes.json();
-    if (!profile?.id) {
-      return res.status(400).json({ error: '登录失败: 无法获取用户信息' });
-    }
-
-    // CZL 返回的邮箱不一定已验证，只有明确 verified 才允许按邮箱关联已有账户，
-    // 否则视为匿名用户走占位邮箱，避免恶意抢绑他人邮箱账户。
-    const verifiedEmail =
-      profile.email_verified === true && typeof profile.email === 'string' && profile.email.includes('@')
-        ? normalizeEmail(profile.email)
-        : null;
-
+    const profile = await exchangeCzlProfile(String(code), redirectUri ? String(redirectUri) : undefined);
     const user = await findOrCreateSocialUser({
-      providerColumn: 'czl_id',
-      providerId: String(profile.id),
-      email: verifiedEmail,
-      name: String(profile.nickname || profile.username || '').trim() || '微信用户',
+      providerColumn: profile.providerColumn,
+      providerId: profile.id,
+      email: profile.email,
+      name: profile.name,
       placeholderPrefix: 'czl',
       placeholderDomain: '@czl.placeholder'
     });
@@ -1413,6 +1600,7 @@ app.post('/api/auth/czl', async (req, res) => {
     }
     res.json(buildAuthResponse(user));
   } catch (e: any) {
+    if (e?.status === 501) return res.status(501).json({ error: e.message });
     if (process.env.NODE_ENV !== 'production') console.error('CZL login error:', e);
     res.status(400).json({ error: '登录失败: ' + e.message });
   }
@@ -1424,50 +1612,13 @@ app.post('/api/auth/github', async (req, res) => {
   if (!code) {
     return res.status(400).json({ error: '缺少 GitHub 登录 code' });
   }
-  const clientId = process.env.GITHUB_APP_ID || '';
-  const clientSecret = process.env.GITHUB_APP_SECRET || '';
-  if (!clientId || !clientSecret) {
-    return res.status(501).json({ error: 'GitHub 登录暂未配置，请联系管理员' });
-  }
   try {
-    // Accept: application/json 必传 —— GitHub 换 token 接口默认返回表单编码
-    // （access_token=...&error=...），res.json() 会直接解析失败。
-    const tokenRes = await directFetch('https://github.com/login/oauth/access_token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Accept: 'application/json'
-      },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code: String(code)
-      }).toString()
-    });
-    const tokenData: any = await tokenRes.json();
-    if (!tokenData.access_token) {
-      return res.status(400).json({ error: 'GitHub 登录失败: ' + (tokenData.error_description || tokenData.error || '无效 code') });
-    }
-
-    // GitHub API 强制要求 User-Agent 头，缺失时可能直接 403
-    const userRes = await directFetch('https://api.github.com/user', {
-      headers: {
-        Authorization: `Bearer ${tokenData.access_token}`,
-        Accept: 'application/vnd.github+json',
-        'User-Agent': 'DingYue-App'
-      }
-    });
-    const profile: any = await userRes.json();
-    if (!profile?.id) {
-      return res.status(400).json({ error: 'GitHub 登录失败: 无法获取用户信息' });
-    }
-
-    const email = typeof profile.email === 'string' && profile.email.includes('@') ? normalizeEmail(profile.email) : null;
+    const profile = await exchangeGithubProfile(String(code));
     const user = await findOrCreateSocialUser({
-      providerColumn: 'github_id',
-      providerId: String(profile.id),
-      email,
-      name: String(profile.name || profile.login || 'GitHub用户').trim(),
+      providerColumn: profile.providerColumn,
+      providerId: profile.id,
+      email: profile.email,
+      name: profile.name,
       placeholderPrefix: 'github',
       placeholderDomain: '@github.placeholder'
     });
@@ -1476,6 +1627,7 @@ app.post('/api/auth/github', async (req, res) => {
     }
     res.json(buildAuthResponse(user));
   } catch (e: any) {
+    if (e?.status === 501) return res.status(501).json({ error: e.message });
     if (process.env.NODE_ENV !== 'production') console.error('GitHub login error:', e);
     res.status(400).json({ error: 'GitHub 登录失败: ' + e.message });
   }
@@ -1487,40 +1639,13 @@ app.post('/api/auth/gitee', async (req, res) => {
   if (!code) {
     return res.status(400).json({ error: '缺少 Gitee 登录 code' });
   }
-  const clientId = process.env.GITEE_APP_ID || '';
-  const clientSecret = process.env.GITEE_APP_SECRET || '';
-  if (!clientId || !clientSecret) {
-    return res.status(501).json({ error: 'Gitee 登录暂未配置，请联系管理员' });
-  }
   try {
-    const tokenRes = await directFetch('https://gitee.com/oauth/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code: String(code),
-        client_id: clientId,
-        client_secret: clientSecret,
-        redirect_uri: redirectUri ? String(redirectUri) : 'https://ngaasiu.studio/'
-      }).toString()
-    });
-    const tokenData: any = await tokenRes.json();
-    if (!tokenData.access_token) {
-      return res.status(400).json({ error: 'Gitee 登录失败: ' + (tokenData.error_description || tokenData.error || '无效 code') });
-    }
-
-    const userRes = await directFetch('https://gitee.com/api/v5/user?access_token=' + encodeURIComponent(tokenData.access_token));
-    const profile: any = await userRes.json();
-    if (!profile?.id) {
-      return res.status(400).json({ error: 'Gitee 登录失败: 无法获取用户信息' });
-    }
-
-    const email = typeof profile.email === 'string' && profile.email.includes('@') ? normalizeEmail(profile.email) : null;
+    const profile = await exchangeGiteeProfile(String(code), redirectUri ? String(redirectUri) : undefined);
     const user = await findOrCreateSocialUser({
-      providerColumn: 'gitee_id',
-      providerId: String(profile.id),
-      email,
-      name: String(profile.name || profile.login || 'Gitee用户').trim(),
+      providerColumn: profile.providerColumn,
+      providerId: profile.id,
+      email: profile.email,
+      name: profile.name,
       placeholderPrefix: 'gitee',
       placeholderDomain: '@gitee.placeholder'
     });
@@ -1529,8 +1654,141 @@ app.post('/api/auth/gitee', async (req, res) => {
     }
     res.json(buildAuthResponse(user));
   } catch (e: any) {
+    if (e?.status === 501) return res.status(501).json({ error: e.message });
     if (process.env.NODE_ENV !== 'production') console.error('Gitee login error:', e);
     res.status(400).json({ error: 'Gitee 登录失败: ' + e.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// 第三方账号绑定 / 解绑（登录后在「第三方登录」页操作）
+// provider 统一用业务名：google / wechat(走 CZL 中继) / github / gitee
+// ─────────────────────────────────────────────
+
+const BIND_PROVIDER_COLUMNS = {
+  google: 'google_id',
+  wechat: 'czl_id',
+  github: 'github_id',
+  gitee: 'gitee_id'
+} as const;
+type BindProvider = keyof typeof BIND_PROVIDER_COLUMNS;
+
+// POST /api/auth/bind/google — Google 绑定：提交登录页同款 id_token 凭证
+app.post('/api/auth/bind/google', authRequired, async (req: AuthenticatedRequest, res) => {
+  const { credential } = req.body;
+  if (!credential) {
+    return res.status(400).json({ error: '缺少 Google 凭证' });
+  }
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: credential,
+      audience: GOOGLE_CLIENT_ID
+    });
+    const payload = ticket.getPayload();
+    if (!payload?.sub) {
+      return res.status(400).json({ error: 'Google 凭证无效' });
+    }
+    await bindSocialAccount(req.user!.userId, 'google_id', payload.sub, payload.name || payload.email || 'Google 账号');
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(typeof e?.status === 'number' ? e.status : 400).json({ error: e.message || '绑定失败' });
+  }
+});
+
+// POST /api/auth/bind/:provider — GitHub / Gitee / 微信(CZL) 绑定：提交 OAuth code
+app.post('/api/auth/bind/:provider', authRequired, async (req: AuthenticatedRequest, res) => {
+  const provider = String(req.params?.provider || '') as BindProvider;
+  if (!(provider in BIND_PROVIDER_COLUMNS)) {
+    return res.status(400).json({ error: '不支持的绑定方式' });
+  }
+  const { code, redirectUri } = req.body;
+  if (!code) {
+    return res.status(400).json({ error: '缺少绑定 code' });
+  }
+  try {
+    const profile =
+      provider === 'github'
+        ? await exchangeGithubProfile(String(code))
+        : provider === 'gitee'
+          ? await exchangeGiteeProfile(String(code), redirectUri ? String(redirectUri) : undefined)
+          : await exchangeCzlProfile(String(code), redirectUri ? String(redirectUri) : undefined);
+    await bindSocialAccount(req.user!.userId, profile.providerColumn, profile.id, profile.name);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(typeof e?.status === 'number' ? e.status : 400).json({ error: e.message || '绑定失败' });
+  }
+});
+
+// POST /api/auth/unbind/:provider — 解绑；解绑后账户必须仍保留至少一种登录方式
+app.post('/api/auth/unbind/:provider', authRequired, async (req: AuthenticatedRequest, res) => {
+  const provider = String(req.params?.provider || '') as BindProvider;
+  if (!(provider in BIND_PROVIDER_COLUMNS)) {
+    return res.status(400).json({ error: '不支持的解绑方式' });
+  }
+  try {
+    const userId = req.user!.userId;
+    const [rows]: any = await pool.query(
+      `SELECT id, password_hash, google_id, apple_id, wechat_id, qq_id, czl_id, github_id, gitee_id
+       FROM users WHERE id = ? LIMIT 1`,
+      [userId]
+    );
+    const user = rows?.[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    const column = BIND_PROVIDER_COLUMNS[provider];
+    if (!user[column]) {
+      return res.status(400).json({ error: '该方式尚未绑定' });
+    }
+    const otherSocialCount = Object.values(BIND_PROVIDER_COLUMNS)
+      .filter((col) => col !== column && user[col])
+      .length
+      + (user.apple_id ? 1 : 0);
+    let passkeyCount = 0;
+    if (!user.password_hash) {
+      const [pkRows]: any = await pool.query(
+        'SELECT COUNT(*) AS count FROM webauthn_credentials WHERE user_id = ?',
+        [userId]
+      );
+      passkeyCount = Number(pkRows?.[0]?.count || 0);
+    }
+    if (!user.password_hash && otherSocialCount === 0 && passkeyCount === 0) {
+      return res.status(400).json({ error: '为了账户安全，请先设置密码或绑定其他登录方式后再解绑' });
+    }
+    await pool.execute(
+      `UPDATE users SET ${column} = NULL, ${column.replace(/_id$/, '_name')} = NULL WHERE id = ?`,
+      [userId]
+    );
+    res.json({ success: true });
+  } catch (e: any) {
+    console.error('Unbind error:', e);
+    res.status(500).json({ error: e.message || '解绑失败' });
+  }
+});
+
+// GET /api/security/bindings — 第三方绑定状态（含展示名）
+app.get('/api/security/bindings', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const [rows]: any = await pool.query(
+      `SELECT google_id, google_name, czl_id, czl_name, github_id, github_name, gitee_id, gitee_name
+       FROM users WHERE id = ? LIMIT 1`,
+      [req.user!.userId]
+    );
+    const user = rows?.[0];
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    res.json({
+      bindings: [
+        { provider: 'google', bound: Boolean(user.google_id), displayName: user.google_name || null },
+        { provider: 'wechat', bound: Boolean(user.czl_id), displayName: user.czl_name || null },
+        { provider: 'github', bound: Boolean(user.github_id), displayName: user.github_name || null },
+        { provider: 'gitee', bound: Boolean(user.gitee_id), displayName: user.gitee_name || null }
+      ]
+    });
+  } catch (e: any) {
+    console.error('Bindings error:', e);
+    res.status(500).json({ error: e.message || '加载绑定信息失败' });
   }
 });
 
@@ -2243,14 +2501,28 @@ app.get('/api/security/overview', authRequired, async (req: AuthenticatedRequest
   }
 });
 
+// PATCH /api/security/email — 换绑邮箱：新邮箱需先收验证码（purpose=change_email），
+// 换绑前查库确认新邮箱未被其他账号占用。
 app.patch('/api/security/email', authRequired, async (req: AuthenticatedRequest, res) => {
   try {
     const userId = req.user!.userId;
-    const nextEmail = String(req.body?.email || '').trim().toLowerCase();
-    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const nextEmail = normalizeEmail(req.body?.email);
+    const code = String(req.body?.code || '').trim();
 
-    if (!nextEmail || !emailPattern.test(nextEmail)) {
-      return res.status(400).json({ error: 'Invalid email address' });
+    if (!nextEmail || !isDeliverableEmail(nextEmail)) {
+      return res.status(400).json({ error: '请输入有效的邮箱地址' });
+    }
+    if (!code) {
+      return res.status(400).json({ error: '请输入新邮箱收到的验证码' });
+    }
+
+    const [currentRows]: any = await pool.query('SELECT id, email FROM users WHERE id = ? LIMIT 1', [userId]);
+    const current = currentRows?.[0];
+    if (!current) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (current.email === nextEmail) {
+      return res.status(400).json({ error: '新邮箱与当前邮箱相同' });
     }
 
     const [dupRows]: any = await pool.query(
@@ -2258,9 +2530,10 @@ app.patch('/api/security/email', authRequired, async (req: AuthenticatedRequest,
       [nextEmail, userId]
     );
     if (Array.isArray(dupRows) && dupRows.length > 0) {
-      return res.status(409).json({ error: 'Email already in use' });
+      return res.status(409).json({ error: '该邮箱已绑定其他 DingYue 账号，请换一个邮箱' });
     }
 
+    await consumeVerificationCode(nextEmail, 'change_email', code);
     await pool.execute('UPDATE users SET email = ? WHERE id = ?', [nextEmail, userId]);
 
     const [rows]: any = await pool.query(
@@ -2274,6 +2547,9 @@ app.patch('/api/security/email', authRequired, async (req: AuthenticatedRequest,
 
     res.json(buildAuthResponse(user));
   } catch (error: any) {
+    if (typeof error?.status === 'number') {
+      return res.status(error.status).json({ error: error.message });
+    }
     console.error('Error updating security email:', error);
     res.status(500).json({ error: error.message });
   }

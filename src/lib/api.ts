@@ -151,6 +151,14 @@ export interface SecurityOverview {
   recommendations: string[];
 }
 
+export type SocialBindingProvider = 'google' | 'wechat' | 'github' | 'gitee';
+
+export interface SocialBinding {
+  provider: SocialBindingProvider;
+  bound: boolean;
+  displayName: string | null;
+}
+
 export interface AuthUserPayload {
   id: number;
   email: string;
@@ -611,14 +619,61 @@ export const api = {
     return response.json();
   },
 
-  async updateSecurityEmail(email: string): Promise<AuthSessionPayload> {
+  async updateSecurityEmail(email: string, code: string): Promise<AuthSessionPayload> {
     const response = await fetch(`${API_URL}/security/email`, {
       method: 'PATCH',
       headers: getAuthHeaders(true),
-      body: JSON.stringify({ email }),
+      body: JSON.stringify({ email, code }),
     });
     if (!response.ok) throw new Error(await parseApiError(response));
     return response.json();
+  },
+
+  // 换绑邮箱 / 注册 / 忘记密码共用的验证码发送
+  async requestEmailCode(email: string, purpose: 'register' | 'reset_password' | 'change_email'): Promise<{ success: boolean; devCode?: string }> {
+    const response = await fetch(`${API_URL}/auth/send-code`, {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({ email, purpose }),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  async getSocialBindings(): Promise<SocialBinding[]> {
+    const response = await fetch(`${API_URL}/security/bindings`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    const data = await response.json();
+    return Array.isArray(data?.bindings) ? data.bindings : [];
+  },
+
+  async bindSocialGoogle(credential: string): Promise<void> {
+    const response = await fetch(`${API_URL}/auth/bind/google`, {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({ credential }),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+  },
+
+  async bindSocialProvider(provider: 'wechat' | 'github' | 'gitee', code: string, redirectUri: string): Promise<void> {
+    const response = await fetch(`${API_URL}/auth/bind/${provider}`, {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({ code, redirectUri }),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+  },
+
+  async unbindSocial(provider: SocialBindingProvider): Promise<void> {
+    const response = await fetch(`${API_URL}/auth/unbind/${provider}`, {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({}),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
   },
 
   async setSecurityPassword(newPassword: string, currentPassword?: string): Promise<SecurityOverview> {

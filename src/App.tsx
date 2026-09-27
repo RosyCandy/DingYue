@@ -11,9 +11,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useI18n } from './lib/i18n';
 import { useAuth } from './lib/auth';
 import LoginPage from './components/LoginPage';
-import { api, buildApiUrl, resolveAssetUrl } from './lib/api';
+import { api, buildApiUrl } from './lib/api';
 import { useTheme } from './lib/theme';
-import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, getOAuthCallbackUri, getCzlCallbackUri, SOCIAL_LOGIN_ERROR_KEY, type SocialOAuthProvider } from './lib/socialAuth';
+import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, getOAuthCallbackUri, getCzlCallbackUri, SOCIAL_BIND_RESULT_KEY, SOCIAL_LOGIN_ERROR_KEY, type SocialOAuthProvider } from './lib/socialAuth';
 import { useAndroidBackButton } from './lib/backButton';
 import { App as CapApp } from '@capacitor/app';
 
@@ -49,12 +49,19 @@ export default function App() {
         if (url.host === 'czl-callback') {
           void closeNativeLoginBrowser();
           if (!code) return;
+          const callback = consumeNativeOAuthCallback(code, state);
+          if (!callback) return;
           void (async () => {
             try {
+              if (callback.bind) {
+                await api.bindSocialProvider('wechat', callback.code, getCzlCallbackUri());
+                sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({ ok: true }));
+                return;
+              }
               const res = await fetch(buildApiUrl('/auth/czl'), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code, redirectUri: getCzlCallbackUri() })
+                body: JSON.stringify({ code: callback.code, redirectUri: getCzlCallbackUri() })
               });
               const data = await res.json();
               if (res.ok) {
@@ -62,8 +69,11 @@ export default function App() {
               } else {
                 sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, data.error || '微信登录失败');
               }
-            } catch {
-              sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，微信登录失败');
+            } catch (err) {
+              sessionStorage.setItem(
+                callback.bind ? SOCIAL_BIND_RESULT_KEY : SOCIAL_LOGIN_ERROR_KEY,
+                callback.bind ? JSON.stringify({ ok: false, message: err instanceof Error ? err.message : '绑定失败' }) : '网络异常，微信登录失败'
+              );
             }
           })();
           return;
@@ -75,6 +85,11 @@ export default function App() {
           if (!callback) return;
           void (async () => {
             try {
+              if (callback.bind) {
+                await api.bindSocialProvider(callback.provider === 'gitee' ? 'gitee' : 'github', callback.code, getOAuthCallbackUri());
+                sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({ ok: true }));
+                return;
+              }
               const res = await fetch(buildApiUrl(`/auth/${callback.provider}`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -86,8 +101,11 @@ export default function App() {
               } else {
                 sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, data.error || '第三方登录失败');
               }
-            } catch {
-              sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，第三方登录失败');
+            } catch (err) {
+              sessionStorage.setItem(
+                callback.bind ? SOCIAL_BIND_RESULT_KEY : SOCIAL_LOGIN_ERROR_KEY,
+                callback.bind ? JSON.stringify({ ok: false, message: err instanceof Error ? err.message : '绑定失败' }) : '网络异常，第三方登录失败'
+              );
             }
           })();
         }
@@ -99,8 +117,9 @@ export default function App() {
   }, [login]);
 
   useEffect(() => {
-    // 微信 / QQ / GitHub / Gitee 网页版扫码登录会跳转离开应用再带 code 回来，在这里完成换 token。
-    // 换 token 的 redirectUri 必须和发起授权时一致（Gitee/CZL 会校验），按 provider 对应。
+    // 微信 / QQ / GitHub / Gitee 网页版扫码登录（及绑定）会跳转离开应用再带 code 回来，
+    // 在这里完成换 token / 绑定。换 token 的 redirectUri 必须和发起授权时一致
+    // （Gitee/CZL 会校验），按 provider 对应。
     const callback = consumeSocialOAuthCallback();
     if (!callback) return;
     const webRedirectUri = (provider: SocialOAuthProvider): string => {
@@ -110,6 +129,13 @@ export default function App() {
     };
     void (async () => {
       try {
+        if (callback.bind) {
+          const provider = callback.provider === 'czl' ? 'wechat' : callback.provider;
+          if (provider === 'qq') throw new Error('暂不支持绑定该方式');
+          await api.bindSocialProvider(provider, callback.code, webRedirectUri(callback.provider));
+          sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({ ok: true }));
+          return;
+        }
         const res = await fetch(buildApiUrl(`/auth/${callback.provider}`), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -121,8 +147,15 @@ export default function App() {
         } else {
           sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, data.error || '第三方登录失败');
         }
-      } catch {
-        sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，第三方登录失败');
+      } catch (err) {
+        if (callback.bind) {
+          sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({
+            ok: false,
+            message: err instanceof Error ? err.message : '绑定失败'
+          }));
+        } else {
+          sessionStorage.setItem(SOCIAL_LOGIN_ERROR_KEY, '网络异常，第三方登录失败');
+        }
       } finally {
         window.history.replaceState({}, '', window.location.pathname);
       }
@@ -177,28 +210,15 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-surface pb-32">
-      {/* Top Header */}
+      {/* Top Header（左上角只保留标题文字，头像只在设置页展示，避免手机端两处头像重复） */}
       <header className="app-header fixed top-0 left-0 w-full z-50 h-16 bg-surface flex items-center justify-between px-6 border-b border-outline-variant/10">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setActiveTab('settings')}
-            className="w-10 h-10 rounded-full overflow-hidden bg-primary-container/20 flex items-center justify-center shrink-0 text-primary font-bold"
-            aria-label="Open profile settings"
-          >
-            {user.avatar ? (
-              <img src={resolveAssetUrl(user.avatar)} alt="" className="w-full h-full object-cover" />
-            ) : (
-              (user.name || user.email).trim().charAt(0).toUpperCase()
-            )}
-          </button>
-          <div className="flex flex-col justify-center">
-            <h1 className="text-lg font-bold tracking-tight text-on-surface leading-tight">
-              {t(`header.${activeTab}.title`)}
-            </h1>
-            <p className="text-[10px] text-on-surface-variant font-medium leading-tight mt-0.5">
-              {t(`header.${activeTab}.subtitle`)}
-            </p>
-          </div>
+        <div className="flex flex-col justify-center">
+          <h1 className="text-lg font-bold tracking-tight text-on-surface leading-tight">
+            {t(`header.${activeTab}.title`)}
+          </h1>
+          <p className="text-[10px] text-on-surface-variant font-medium leading-tight mt-0.5">
+            {t(`header.${activeTab}.subtitle`)}
+          </p>
         </div>
         <button
           onClick={() => setShowWalletModal(true)}
