@@ -134,8 +134,11 @@ export default function LandingPage({ onEnter }: { onEnter: () => void }) {
       </main>
 
       <footer className="border-t border-outline-variant/10 mt-8">
-        <div className="max-w-4xl mx-auto px-6 py-6 text-center text-xs text-on-surface-variant/70">
-          DingYue 订阅管理助手 · v{appVersion} · 数据云端同步，隐私仅存本人账号
+        <div className="max-w-4xl mx-auto px-6 py-6 text-center text-xs text-on-surface-variant/70 space-y-1">
+          <p>DingYue 订阅管理助手 · v{appVersion} · 数据云端同步，隐私仅存本人账号</p>
+          <p>
+            联系我们：<a href="mailto:support@ngaasiu.studio" className="text-primary hover:underline">support@ngaasiu.studio</a>
+          </p>
         </div>
       </footer>
     </div>
