@@ -129,17 +129,17 @@ export default function WalletModal({ onClose }: { onClose: () => void }) {
                   </div>
                   <div className="flex-1">
                     <h4 className="font-bold text-on-surface">{method.label}</h4>
-                    <p className="text-xs text-on-surface-variant">{method.accountRef || method.methodType}</p>
+                    <p className="text-xs text-on-surface-variant">{method.accountRef || methodTypeLabel(method.methodType, t)}</p>
                   </div>
                   <div className="flex items-center gap-2">
                     {method.isDefault ? (
-                      <div className="text-xs font-bold text-primary bg-primary/10 px-2 py-1 rounded-md">Default</div>
+                      <div className="text-xs font-bold text-primary bg-primary/10 px-2 py-1 rounded-md">{t('wallet.default')}</div>
                     ) : (
                       <button
                         onClick={() => void makeDefault(method)}
                         className="text-xs text-primary font-semibold"
                       >
-                        Set Default
+                        {t('wallet.setDefault')}
                       </button>
                     )}
                     <button
@@ -155,7 +155,7 @@ export default function WalletModal({ onClose }: { onClose: () => void }) {
 
               {methods.length === 0 && (
                 <div className="text-sm text-on-surface-variant bg-surface-container-lowest rounded-2xl p-5 border border-outline-variant/10">
-                  No payment methods yet.
+                  {t('wallet.empty')}
                 </div>
               )}
 
@@ -165,31 +165,31 @@ export default function WalletModal({ onClose }: { onClose: () => void }) {
                     value={label}
                     onChange={(e) => setLabel(e.target.value)}
                     className="w-full bg-surface border border-outline-variant/20 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
-                    placeholder="Method name (e.g. Visa 4242)"
+                    placeholder={t('wallet.methodNamePlaceholder')}
                   />
                   <select
                     value={methodType}
                     onChange={(e) => setMethodType(e.target.value as PaymentMethod['methodType'])}
                     className="w-full bg-surface border border-outline-variant/20 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
                   >
-                    <option value="credit_card">Credit Card</option>
-                    <option value="apple_pay">Apple Pay</option>
-                    <option value="paypal">PayPal</option>
-                    <option value="bank_transfer">Bank Transfer</option>
-                    <option value="other">Other</option>
+                    <option value="credit_card">{t('wallet.typeCreditCard')}</option>
+                    <option value="apple_pay">{t('wallet.typeApplePay')}</option>
+                    <option value="paypal">{t('wallet.typePaypal')}</option>
+                    <option value="bank_transfer">{t('wallet.typeBankTransfer')}</option>
+                    <option value="other">{t('wallet.typeOther')}</option>
                   </select>
                   <input
                     value={accountRef}
                     onChange={(e) => setAccountRef(e.target.value)}
                     className="w-full bg-surface border border-outline-variant/20 rounded-xl px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
-                    placeholder="Account ref (optional)"
+                    placeholder={t('wallet.accountRefPlaceholder')}
                   />
                   <button
                     onClick={() => void createMethod()}
                     className="w-full py-2 rounded-xl bg-primary text-white text-sm font-bold"
                   >
                     <CheckCircle2 size={16} className="inline-block mr-1" />
-                    Save Method
+                    {t('wallet.save')}
                   </button>
                 </div>
               )}
@@ -201,10 +201,21 @@ export default function WalletModal({ onClose }: { onClose: () => void }) {
             className="w-full mt-4 py-4 rounded-2xl border-2 border-dashed border-outline-variant/30 text-on-surface-variant font-bold flex items-center justify-center gap-2 hover:bg-surface-container-lowest hover:border-primary/30 hover:text-primary transition-all active:scale-[0.98]"
           >
             <Plus size={20} />
-            {showForm ? 'Cancel' : t('wallet.add')}
+            {showForm ? t('add.cancel') : t('wallet.add')}
           </button>
         </div>
       </motion.div>
     </motion.div>
   );
+}
+
+// 支付方式类型的显示名（存库值为英文枚举，展示按语言翻译）
+export function methodTypeLabel(type: string, t: (key: string) => string): string {
+  switch (type) {
+    case 'credit_card': return t('wallet.typeCreditCard');
+    case 'apple_pay': return t('wallet.typeApplePay');
+    case 'paypal': return t('wallet.typePaypal');
+    case 'bank_transfer': return t('wallet.typeBankTransfer');
+    default: return t('wallet.typeOther');
+  }
 }

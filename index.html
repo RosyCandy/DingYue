@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>DingYue</title>
+    <link rel="icon" type="image/png" href="/icon.png" />
     <!-- 字体已在 src/index.css 自托管（/fonts/*.woff2），不再请求 fonts.googleapis.com：
          大陆网络下该域名不可达，<head> 里的样式表会阻塞首屏导致长时间白屏 -->
     <style>
@@ -17,20 +18,14 @@
         align-items: center;
         justify-content: center;
         gap: 14px;
-        background: #f9f9fe;
+        background: #f5f3ec;
         font-family: -apple-system, "PingFang SC", "MiSans", "Microsoft YaHei", sans-serif;
       }
       #boot-splash .boot-logo {
-        width: 56px;
-        height: 56px;
-        border-radius: 15px;
-        background: linear-gradient(135deg, #316ee9, #0054cd);
-        color: #fff;
-        font-size: 30px;
-        font-weight: 800;
-        display: flex;
-        align-items: center;
-        justify-content: center;
+        width: 72px;
+        height: 72px;
+        border-radius: 18px;
+        box-shadow: 0 4px 16px rgba(30, 30, 30, 0.08);
       }
       #boot-splash .boot-name {
         font-size: 14px;
@@ -40,8 +35,8 @@
       #boot-splash .boot-spinner {
         width: 22px;
         height: 22px;
-        border: 3px solid #e0e4f0;
-        border-top-color: #0054cd;
+        border: 3px solid #e3e0d6;
+        border-top-color: #8f6bc8;
         border-radius: 50%;
         animation: boot-spin 0.8s linear infinite;
       }
@@ -50,7 +45,7 @@
   </head>
   <body>
     <div id="boot-splash">
-      <div class="boot-logo">D</div>
+      <img class="boot-logo" src="/icon.png" alt="" />
       <div class="boot-name">DingYue 订阅管理助手</div>
       <div class="boot-spinner"></div>
     </div>

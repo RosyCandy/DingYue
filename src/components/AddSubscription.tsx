@@ -140,9 +140,9 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                 <div className="bg-surface-container-low p-6 rounded-xl space-y-6">
                   <div className="space-y-2">
                     <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.subName')}</label>
-                    <input 
-                      className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 placeholder:text-outline-variant transition-all shadow-sm" 
-                      placeholder="e.g. Netflix, Adobe Creative Cloud" 
+                    <input
+                      className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 placeholder:text-outline-variant transition-all shadow-sm"
+                      placeholder={t('add.subNamePlaceholder')}
                       type="text"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
@@ -152,25 +152,26 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                     <div className="space-y-2">
                       <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.category')}</label>
                       <div className="relative">
-                        <select 
+                        <select
                           className="w-full bg-surface-container-lowest border-none rounded-lg p-4 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm"
                           value={category}
                           onChange={(e) => setCategory(e.target.value)}
                         >
-                          <option>Entertainment</option>
-                          <option>Productivity</option>
-                          <option>Software</option>
-                          <option>Lifestyle</option>
-                          <option>Finance</option>
+                          {/* 存库值保持英文，显示按语言翻译 */}
+                          <option value="Entertainment">{t('cat.entertainment')}</option>
+                          <option value="Productivity">{t('cat.productivity')}</option>
+                          <option value="Software">{t('cat.software')}</option>
+                          <option value="Lifestyle">{t('cat.lifestyle')}</option>
+                          <option value="Finance">{t('cat.finance')}</option>
                         </select>
                         <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={20} />
                       </div>
                     </div>
                     <div className="space-y-2">
                       <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.region')}</label>
-                      <input 
-                        className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 placeholder:text-outline-variant transition-all shadow-sm" 
-                        placeholder="e.g. US, EU, UK" 
+                      <input
+                        className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 placeholder:text-outline-variant transition-all shadow-sm"
+                        placeholder={t('add.regionPlaceholder')}
                         type="text"
                         value={region}
                         onChange={(e) => setRegion(e.target.value)}
@@ -191,14 +192,14 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                     <div className="space-y-2">
                       <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.source')}</label>
                       <div className="relative">
-                        <select 
+                        <select
                           className="w-full bg-surface-container-lowest border-none rounded-lg p-4 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm"
                           value={source}
                           onChange={(e) => setSource(e.target.value)}
                         >
-                          <option>Apple App Store</option>
-                          <option>Google Play Store</option>
-                          <option>Direct Billing</option>
+                          <option value="Apple App Store">{t('add.sourceApple')}</option>
+                          <option value="Google Play Store">{t('add.sourceGoogle')}</option>
+                          <option value="Direct Billing">{t('add.sourceDirect')}</option>
                         </select>
                         <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={20} />
                       </div>
@@ -267,8 +268,8 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                           value={cycle}
                           onChange={(e) => setCycle(e.target.value as 'monthly' | 'annually')}
                         >
-                          <option value="monthly">Monthly</option>
-                          <option value="annually">Annually</option>
+                          <option value="monthly">{t('add.monthly')}</option>
+                          <option value="annually">{t('add.annually')}</option>
                         </select>
                         <Clock className="absolute right-4 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none" size={20} />
                       </div>

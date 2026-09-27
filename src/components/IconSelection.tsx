@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Search, ChevronRight, ImagePlus, FolderOpen, Loader2, Globe } from 'lucide-react';
 import { api, resolveAssetUrl } from '../lib/api';
+import { useI18n } from '../lib/i18n';
 
 interface IconSelectionProps {
   onSelect: (icon: string) => void;
@@ -48,6 +49,7 @@ interface OnlineIcon {
 }
 
 export default function IconSelection({ onSelect, onBack }: IconSelectionProps) {
+  const { t } = useI18n();
   const [search, setSearch] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -133,7 +135,7 @@ export default function IconSelection({ onSelect, onBack }: IconSelectionProps) 
     e.target.value = '';
     if (!file) return;
     if (!isImageFile(file)) {
-      setUploadError('Please choose an image file.');
+      setUploadError(t('icon.invalidFile'));
       return;
     }
     await handleUploadFile(file);
@@ -145,7 +147,7 @@ export default function IconSelection({ onSelect, onBack }: IconSelectionProps) 
 
     const imageFiles = files.filter(isImageFile).slice(0, 36);
     if (imageFiles.length === 0) {
-      setUploadError('No image files found in that folder.');
+      setUploadError(t('icon.noImagesInFolder'));
       setFolderFiles([]);
       return;
     }
@@ -204,8 +206,8 @@ export default function IconSelection({ onSelect, onBack }: IconSelectionProps) 
       />
 
       <div className="mb-8">
-        <h2 className="font-manrope text-2xl font-extrabold text-on-surface mb-2">Select Icon</h2>
-        <p className="text-on-surface-variant text-sm font-medium">Search the app store or upload your own.</p>
+        <h2 className="font-manrope text-2xl font-extrabold text-on-surface mb-2">{t('icon.title')}</h2>
+        <p className="text-on-surface-variant text-sm font-medium">{t('icon.subtitle')}</p>
       </div>
 
       <div className="relative mb-6 group">
@@ -214,7 +216,7 @@ export default function IconSelection({ onSelect, onBack }: IconSelectionProps) 
         </div>
         <input
           className="w-full h-14 pl-12 pr-4 bg-surface-container-low border-none rounded-xl font-inter text-on-surface placeholder:text-on-surface-variant/60 focus:ring-2 focus:ring-primary/20 focus:bg-surface-container-lowest transition-all"
-          placeholder="搜索应用，如 微信 / Netflix..." 
+          placeholder={t('icon.searchPlaceholder')} 
           type="text"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -223,32 +225,32 @@ export default function IconSelection({ onSelect, onBack }: IconSelectionProps) 
 
       {onlineLoading && (
         <p className="flex items-center gap-2 text-xs text-on-surface-variant mb-4 px-1">
-          <Loader2 size={14} className="animate-spin" /> 正在搜索应用商店...
+          <Loader2 size={14} className="animate-spin" /> {t('icon.searchingStore')}
         </p>
       )}
       {onlineIcons && onlineIcons.length > 0 && (
         <div className="mb-8">
           <h3 className="font-manrope text-xs font-bold uppercase tracking-widest text-on-surface-variant/70 mb-3 flex items-center gap-1">
-            <Globe size={12} /> App Store 结果
+            <Globe size={12} /> {t('icon.appStoreResults')}
           </h3>
           {renderIconGrid(onlineIcons.map((item) => ({ name: item.name, icon: item.url })))}
         </div>
       )}
       {onlineIcons && !onlineLoading && onlineIcons.length === 0 && keyword && (
         <p className="text-xs text-on-surface-variant mb-6 px-1">
-          应用商店没有找到「{keyword}」，可以直接上传图片作为图标。
+          {t('icon.noStoreResults').replace('{kw}', keyword)}
         </p>
       )}
 
       {filtered.length > 0 && (
         <div className="mb-6">
-          <h3 className="font-manrope text-xs font-bold uppercase tracking-widest text-on-surface-variant/70 mb-3">Popular Services</h3>
+          <h3 className="font-manrope text-xs font-bold uppercase tracking-widest text-on-surface-variant/70 mb-3">{t('icon.popularServices')}</h3>
           {renderIconGrid(filtered)}
         </div>
       )}
 
       <div className="mt-auto space-y-4 pt-6">
-        <h3 className="font-manrope text-xs font-bold uppercase tracking-widest text-on-surface-variant/70 mb-2">Can't find it?</h3>
+        <h3 className="font-manrope text-xs font-bold uppercase tracking-widest text-on-surface-variant/70 mb-2">{t('icon.cantFind')}</h3>
         {uploadError && (
           <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-600">
             {uploadError}
@@ -257,7 +259,7 @@ export default function IconSelection({ onSelect, onBack }: IconSelectionProps) 
 
         {folderFiles.length > 0 && (
           <div className="space-y-3">
-            <p className="text-xs font-semibold text-on-surface-variant">Images from folder</p>
+            <p className="text-xs font-semibold text-on-surface-variant">{t('icon.folderImages')}</p>
             <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
               {folderFiles.map((item) => (
                 <button
@@ -287,8 +289,8 @@ export default function IconSelection({ onSelect, onBack }: IconSelectionProps) 
               {uploading ? <Loader2 className="animate-spin" size={22} /> : <ImagePlus size={22} />}
             </div>
             <div className="text-left">
-              <p className="font-bold text-on-surface">Upload from photos/files</p>
-              <p className="text-xs text-on-surface-variant">Pick an image from your local album or files</p>
+              <p className="font-bold text-on-surface">{t('icon.uploadPhotos')}</p>
+              <p className="text-xs text-on-surface-variant">{t('icon.uploadPhotosDesc')}</p>
             </div>
             <ChevronRight className="ml-auto text-on-surface-variant/40" size={20} />
           </button>
@@ -302,8 +304,8 @@ export default function IconSelection({ onSelect, onBack }: IconSelectionProps) 
               <FolderOpen size={22} />
             </div>
             <div className="text-left">
-              <p className="font-bold text-on-surface">Upload from folder</p>
-              <p className="text-xs text-on-surface-variant">Choose a folder and select an image from it</p>
+              <p className="font-bold text-on-surface">{t('icon.uploadFolder')}</p>
+              <p className="text-xs text-on-surface-variant">{t('icon.uploadFolderDesc')}</p>
             </div>
             <ChevronRight className="ml-auto text-on-surface-variant/40" size={20} />
           </button>
