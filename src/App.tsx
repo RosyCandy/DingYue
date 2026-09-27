@@ -1,12 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { LayoutGrid, ReceiptText, BarChart3, Settings as SettingsIcon, Wallet, Plus } from 'lucide-react';
+import { LayoutGrid, ReceiptText, BarChart3, Settings as SettingsIcon, Plus } from 'lucide-react';
 import { cn } from './lib/utils';
 import Dashboard from './components/Dashboard';
 import Subscriptions from './components/Subscriptions';
 import Statistics from './components/Statistics';
 import Settings from './components/Settings';
 import AddSubscription from './components/AddSubscription';
-import WalletModal from './components/WalletModal';
 import { motion, AnimatePresence } from 'motion/react';
 import { useI18n } from './lib/i18n';
 import { useAuth } from './lib/auth';
@@ -27,7 +26,6 @@ export default function App() {
     sessionStorage.getItem(SOCIAL_BIND_NAV_KEY) === 'social' ? 'settings' : 'dashboard'
   );
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showWalletModal, setShowWalletModal] = useState(false);
   const { t, setLanguage } = useI18n();
   const { setTheme } = useTheme();
 
@@ -212,8 +210,9 @@ export default function App() {
 
   // 未登录时先展示产品落地页（介绍 + 下载），点「进入应用」后才是登录页；
   // 会话内点过一次就不再重复出现
+  const isDesktopApp = /Electron/i.test(navigator.userAgent);
   const [landingVisible, setLandingVisible] = useState(
-    () => !user && sessionStorage.getItem('landing_entered') !== '1'
+    () => !user && !isDesktopApp && sessionStorage.getItem('landing_entered') !== '1'
   );
 
   const enterApp = () => {
@@ -251,13 +250,6 @@ export default function App() {
             {t(`header.${activeTab}.subtitle`)}
           </p>
         </div>
-        <button
-          onClick={() => setShowWalletModal(true)}
-          className="w-10 h-10 rounded-full bg-surface-container-low text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors flex items-center justify-center"
-          aria-label="Open wallet"
-        >
-          <Wallet size={18} />
-        </button>
       </header>
 
       {/* Main Content */}
@@ -315,13 +307,6 @@ export default function App() {
       <AnimatePresence>
         {showAddModal && (
           <AddSubscription onClose={() => setShowAddModal(false)} />
-        )}
-      </AnimatePresence>
-
-      {/* Wallet Modal */}
-      <AnimatePresence>
-        {showWalletModal && (
-          <WalletModal onClose={() => setShowWalletModal(false)} />
         )}
       </AnimatePresence>
     </div>

@@ -7,6 +7,7 @@
   },
   "files": [
     "electron/**/*",
+    "dist/**/*",
     "!**/*.map"
   ],
   "icon": "resources/icon.png",

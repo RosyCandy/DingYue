@@ -24,7 +24,7 @@ const languageOptions: Array<{ value: Language; label: string }> = [
   { value: '한국어', label: '한국어' },
 ];
 
-const CONTACT_EMAIL = 'rosyhazes@126.com';
+const CONTACT_EMAIL = 'support@ngaasiu.studio';
 
 // 站内导航：个人中心及其子页面在设置页内部切换（类似微信），不弹窗
 type SettingsView = 'main' | 'profile' | 'nickname' | 'email' | 'password' | 'passkey' | 'danger' | 'social' | 'help' | 'about';
