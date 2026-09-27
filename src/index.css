@@ -101,5 +101,7 @@
 }
 
 .app-bottom-nav {
-  padding-bottom: calc(2rem + env(safe-area-inset-bottom));
+  /* 底部只保留系统安全区（iOS home indicator），安卓/网页 env=0 退回 1rem；
+     之前固定 2rem 再叠加安全区造成 iOS 底部空白过大 */
+  padding-bottom: calc(1rem + env(safe-area-inset-bottom));
 }

@@ -240,7 +240,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-surface pb-32">
+    <div className="min-h-screen bg-surface pb-[calc(7.5rem+env(safe-area-inset-bottom))]">
       {/* Top Header（左上角只保留标题文字，头像只在设置页展示，避免手机端两处头像重复） */}
       <header className="app-header fixed top-0 left-0 w-full z-50 h-16 bg-surface flex items-center justify-between px-6 border-b border-outline-variant/10">
         <div className="flex flex-col justify-center">
@@ -278,7 +278,7 @@ export default function App() {
       {/* FAB */}
       <button 
         onClick={() => setShowAddModal(true)}
-        className="fixed bottom-28 right-6 w-14 h-14 rounded-full bg-gradient-to-br from-primary to-primary-container text-white shadow-2xl flex items-center justify-center hover:opacity-90 active:scale-90 transition-all z-40"
+        className="fixed bottom-[calc(6.25rem+env(safe-area-inset-bottom))] right-6 w-14 h-14 rounded-full bg-gradient-to-br from-primary to-primary-container text-white shadow-2xl flex items-center justify-center hover:opacity-90 active:scale-90 transition-all z-40"
       >
         <Plus size={28} />
       </button>
