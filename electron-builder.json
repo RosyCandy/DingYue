@@ -1,0 +1,46 @@
+{
+  "appId": "com.duoduo.app",
+  "productName": "DingYue",
+  "directories": {
+    "output": "desktop-dist",
+    "buildResources": "resources"
+  },
+  "files": [
+    "electron/**/*",
+    "!**/*.map"
+  ],
+  "icon": "resources/icon.png",
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "artifactName": "DingYue-${version}-setup.${ext}"
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true
+  },
+  "mac": {
+    "target": [
+      {
+        "target": "dmg",
+        "arch": ["arm64"]
+      }
+    ],
+    "identity": null,
+    "artifactName": "DingYue-${version}-mac.${ext}"
+  },
+  "linux": {
+    "target": [
+      "AppImage",
+      "deb",
+      "rpm"
+    ],
+    "category": "Utility",
+    "artifactName": "DingYue-${version}-${arch}.${ext}"
+  }
+}
