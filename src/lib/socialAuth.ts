@@ -1,4 +1,5 @@
 import { Capacitor } from '@capacitor/core';
+import { Browser } from '@capacitor/browser';
 import { AppleSignIn, SignInScope, ErrorCode } from '@capawesome/capacitor-apple-sign-in';
 
 // 各登录方式的可用性由环境变量开关（VITE_APPLE_CLIENT_ID / VITE_WECHAT_APP_ID / VITE_QQ_APP_ID）。
@@ -121,6 +122,12 @@ export function beginQqLogin(): void {
 // CZL Connect 中继登录，upstream_providers=wechat 把授权页限定为微信入口。
 // 统一使用中转页接收 CZL 回调：App 端通过深链 duoduoapp://czl-callback 返回，
 // Web 端通过中转页回退到站点首页由 useEffect 消费 code。
+//
+// 原生端（安卓/iOS）不用 window.location.href 整页跳转：Capacitor 会把这类跳转
+// 交给系统浏览器处理，导致应用整体切出到 Chrome/Safari，体验割裂，还容易撞上
+// 微信「请在微信客户端打开链接」的限制。改用系统内置浏览器（Custom Tabs /
+// SFSafariViewController）以覆盖层形式打开授权页，用户仍停留在 App 内，关闭
+// 或授权完成后通过 duoduoapp://czl-callback 深链自动收起，体验更接近“点一下就登录”。
 export function beginCzlLogin(): void {
   if (!CZL_CLIENT_ID) return;
   const redirectUri = `${window.location.origin}/czl-callback.html`;
@@ -132,7 +139,23 @@ export function beginCzlLogin(): void {
     state: buildOAuthState('czl'),
     upstream_providers: 'wechat'
   });
-  window.location.href = `${CZL_BASE_URL}/oauth2/authorize?${params.toString()}`;
+  const url = `${CZL_BASE_URL}/oauth2/authorize?${params.toString()}`;
+  if (Capacitor.isNativePlatform()) {
+    void Browser.open({ url, presentationStyle: 'popover' });
+    return;
+  }
+  window.location.href = url;
+}
+
+// 授权成功后（duoduoapp://czl-callback 深链到达）应用侧调用，收起还开着的原生浏览器覆盖层。
+// 浏览器本来就没打开时 close() 会静默失败，因此吞掉异常即可。
+export async function closeCzlLoginBrowser(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return;
+  try {
+    await Browser.close();
+  } catch {
+    // 没有打开的浏览器实例，忽略
+  }
 }
 
 // GitHub OAuth（标准授权码流程）

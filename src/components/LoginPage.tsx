@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Fingerprint } from 'lucide-react';
 import { useAuth } from '../lib/auth';
+import { buildApiUrl } from '../lib/api';
 import { GoogleLogin } from '@react-oauth/google';
 import { isNativePlatform, signInWithGoogleNative, NativeGoogleSignInCanceledError } from '../lib/nativeGoogleAuth';
 import {
@@ -13,6 +14,8 @@ import {
     beginWechatLogin,
     beginQqLogin,
     beginCzlLogin,
+    beginGithubLogin,
+    beginGiteeLogin,
     SOCIAL_LOGIN_ERROR_KEY
 } from '../lib/socialAuth';
 import { loginWithPasskey, isPasskeyUserCancellation } from '../lib/passkey';
@@ -43,6 +46,8 @@ export default function LoginPage() {
     const appleAvailable = isAppleLoginAvailable();
     const czlAvailable = isCzlWechatLoginAvailable();
     const wechatEntryAvailable = wechatAvailable || czlAvailable;
+    const githubAvailable = true;  // GitHub 按钮始终显示
+    const giteeAvailable = true;  // Gitee 按钮始终显示
 
     useEffect(() => {
         const socialError = sessionStorage.getItem(SOCIAL_LOGIN_ERROR_KEY);
@@ -128,7 +133,7 @@ export default function LoginPage() {
 
     const sendCredentialToBackend = async (credential: string) => {
         try {
-            const res = await fetch('/api/auth/google', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }) });
+            const res = await fetch(buildApiUrl('/auth/google'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ credential }) });
             const data = await res.json();
             if (!res.ok) {
                 setError(data.error || 'Google 登录失败');
@@ -175,7 +180,7 @@ export default function LoginPage() {
         resetMessages();
         try {
             const { idToken, name } = await signInWithApple();
-            const res = await fetch('/api/auth/apple', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identityToken: idToken, name }) });
+            const res = await fetch(buildApiUrl('/auth/apple'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ identityToken: idToken, name }) });
             const data = await res.json();
             if (!res.ok) return setError(data.error || 'Apple 登录失败');
             login(data.token, data.user);
@@ -282,7 +287,7 @@ export default function LoginPage() {
                                 </SocialButton>
                             ) : (
                                 <GoogleLogin
-                                    shape="square"
+                                    shape="circle"
                                     size="large"
                                     width={48}
                                     logo_alignment="center"
@@ -291,6 +296,16 @@ export default function LoginPage() {
                                     }}
                                     onError={() => setError('Google 登录失败')}
                                 />
+                            )}
+                            {githubAvailable && (
+                                <SocialButton label="GitHub 登录" onClick={() => beginGithubLogin()}>
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="#181717"><path d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.463-1.11-1.463-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z"/></svg>
+                                </SocialButton>
+                            )}
+                            {giteeAvailable && (
+                                <SocialButton label="Gitee 登录" onClick={() => beginGiteeLogin()}>
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="#C71D23"><path d="M11.984 18.364c-.939 0-1.496-.476-1.496-1.484V8.8c0-.658.35-1.026.944-1.026.594 0 .94.368.94 1.026v8.08c0 .658-.346 1.024-.94 1.024-.593 0-.943-.366-.943-1.024v-.375h1.89v.375c0 1.008.557 1.484 1.496 1.484.94 0 1.496-.476 1.496-1.484V8.8c0-.658.35-1.026.944-1.026.594 0 .94.368.94 1.026v8.08c0 1.008-.557 1.484-1.496 1.484-.94 0-1.496-.476-1.496-1.484v-.375H11.984z"/></svg>
+                                </SocialButton>
                             )}
                         </div>
                     </>

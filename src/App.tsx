@@ -13,7 +13,7 @@ import { useAuth } from './lib/auth';
 import LoginPage from './components/LoginPage';
 import { api, buildApiUrl, resolveAssetUrl } from './lib/api';
 import { useTheme } from './lib/theme';
-import { consumeSocialOAuthCallback, SOCIAL_LOGIN_ERROR_KEY } from './lib/socialAuth';
+import { consumeSocialOAuthCallback, closeCzlLoginBrowser, SOCIAL_LOGIN_ERROR_KEY } from './lib/socialAuth';
 import { useAndroidBackButton } from './lib/backButton';
 import { App as CapApp } from '@capacitor/app';
 
@@ -45,6 +45,7 @@ export default function App() {
         if (url.host !== 'czl-callback') return;
         const code = url.searchParams.get('code');
         const state = url.searchParams.get('state');
+        void closeCzlLoginBrowser();
         if (!code) return;
         void (async () => {
           try {

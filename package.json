@@ -1,7 +1,7 @@
 {
   "name": "react-example",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.2.5",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run frontend\" \"npm run server\"",
@@ -20,6 +20,7 @@
   "dependencies": {
     "@capacitor/android": "^8.5.1",
     "@capacitor/app": "^8.1.1",
+    "@capacitor/browser": "^8.0.4",
     "@capacitor/cli": "^8.5.1",
     "@capacitor/core": "^8.5.1",
     "@capacitor/ios": "^8.5.1",

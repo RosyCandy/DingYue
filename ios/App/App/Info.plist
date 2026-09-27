@@ -28,6 +28,14 @@
 				<string>com.googleusercontent.apps.333204279819-4upbq40fe51a444jsbr91soku4hdemcq</string>
 			</array>
 		</dict>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.duoduo.app.czlcallback</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>duoduoapp</string>
+			</array>
+		</dict>
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
