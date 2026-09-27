@@ -1430,9 +1430,14 @@ app.post('/api/auth/github', async (req, res) => {
     return res.status(501).json({ error: 'GitHub 登录暂未配置，请联系管理员' });
   }
   try {
+    // Accept: application/json 必传 —— GitHub 换 token 接口默认返回表单编码
+    // （access_token=...&error=...），res.json() 会直接解析失败。
     const tokenRes = await directFetch('https://github.com/login/oauth/access_token', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Accept: 'application/json'
+      },
       body: new URLSearchParams({
         client_id: clientId,
         client_secret: clientSecret,
@@ -1444,8 +1449,13 @@ app.post('/api/auth/github', async (req, res) => {
       return res.status(400).json({ error: 'GitHub 登录失败: ' + (tokenData.error_description || tokenData.error || '无效 code') });
     }
 
+    // GitHub API 强制要求 User-Agent 头，缺失时可能直接 403
     const userRes = await directFetch('https://api.github.com/user', {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` }
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'DingYue-App'
+      }
     });
     const profile: any = await userRes.json();
     if (!profile?.id) {
