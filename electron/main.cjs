@@ -34,7 +34,7 @@ let mainWindow = null;
 
 function indexHtml() {
   // 打包后 dist 在 asar 内；开发态在项目根
-  const packaged = path.join(__dirname, '..', 'dist', 'index.html');
+  const packaged = path.join(__dirname, '..', 'desktop-files', 'dist', 'index.html');
   if (fs.existsSync(packaged)) return packaged;
   return path.join(__dirname, '..', '..', 'dist', 'index.html');
 }

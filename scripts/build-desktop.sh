@@ -10,6 +10,9 @@ export ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-
 echo "==> 1/3 构建 Web（公网 API）"
 VITE_API_BASE_URL="https://ngaasiu.studio/api" npm run build
 
+echo "==> 1.5/3 复制界面资源到打包目录（dist 是 electron-builder 保留目录名，需换名打包）"
+rm -rf desktop-files && mkdir -p desktop-files && cp -a dist desktop-files/dist
+
 echo "==> 2/3 electron-builder (mac + win + AppImage)"
 npx electron-builder -mw --config electron-builder.json
 find desktop-dist -name "* 2.*" -delete 2>/dev/null || true
