@@ -21,7 +21,7 @@ const NAV_ALLOW = [
   'https://myaccount.google.com',
 ];
 // 授权完成后 provider 重定向回的回调页：拦截并转回本地界面消费 code
-const CALLBACK_PAGES = ['https://ngaasiu.studio/oauth-callback.html', 'https://ngaasiu.studio/czl-callback.html'];
+const CALLBACK_PAGES = ['https://ngaasiu.studio/oauth-callback.html', 'https://ngaasiu.studio/czl-callback.html', 'https://ngaasiu.studio/?'];
 
 const isAllowed = (url) => {
   try {

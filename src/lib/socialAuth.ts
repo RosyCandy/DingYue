@@ -200,6 +200,23 @@ export function beginGithubLogin(bind = false): void {
   window.location.href = url;
 }
 
+// 桌面端（Electron）Google 登录：app:// origin 不符合 Google OAuth 政策（400 invalid_request），
+// 不能用 GIS 弹窗，改为整窗跳转 Google 授权码流程，回调到站点首页由桌面壳拦截转回本地。
+// 需要先在 Google Cloud Console 给 OAuth 客户端添加已授权重定向 URI：https://ngaasiu.studio/
+export function beginGoogleCodeLogin(): void {
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+  if (!clientId) return;
+  const params = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: `${SITE_ORIGIN}/`,
+    response_type: 'code',
+    scope: 'openid email profile',
+    state: buildOAuthState('google'),
+    prompt: 'select_account'
+  });
+  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+}
+
 // Gitee OAuth（标准授权码流程；原生端用内置浏览器 + 深链回调）
 // 注意 response_type=code 必传：Gitee 不像 GitHub 会默认按 code 处理，
 // 缺了会报「服务器不支持这种 response type」。
@@ -220,7 +237,7 @@ export function beginGiteeLogin(bind = false): void {
   window.location.href = url;
 }
 
-export type SocialOAuthProvider = 'wechat' | 'qq' | 'czl' | 'github' | 'gitee';
+export type SocialOAuthProvider = 'wechat' | 'qq' | 'czl' | 'github' | 'gitee' | 'google';
 
 export type SocialOAuthCallback = {
   provider: SocialOAuthProvider;
@@ -235,6 +252,7 @@ const resolveProviderFromState = (state: string): SocialOAuthProvider | null => 
   if (state.startsWith('czl_')) return 'czl';
   if (state.startsWith('github_')) return 'github';
   if (state.startsWith('gitee_')) return 'gitee';
+  if (state.startsWith('google_')) return 'google';
   return null;
 };
 

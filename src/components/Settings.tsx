@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
-  User, Bell, Lock, HelpCircle, LogOut, ChevronRight, ChevronDown, RefreshCw, Palette, Languages,
+  User, Bell, HelpCircle, LogOut, ChevronRight, ChevronDown, RefreshCw, Palette, Languages,
   X, Check, Loader2, Info, Mail, ArrowLeft, Fingerprint, Trash2,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -159,14 +159,6 @@ export default function Settings() {
     setLanguage(nextLanguage);
     setShowLanguageSelect(false);
     await saveSettings({ language: nextLanguage });
-  };
-
-  const handleAppLockToggle = async () => {
-    const nextValue = !(userSettings?.appLockEnabled || false);
-    const updated = await saveSettings({ appLockEnabled: nextValue });
-    if (updated) {
-      setUserSettings(updated);
-    }
   };
 
   const handleCloudSync = async () => {
@@ -712,12 +704,6 @@ export default function Settings() {
                   label={t('settings.language')}
                   value={language}
                   onClick={() => setShowLanguageSelect(true)}
-                />
-                <SettingsItem
-                  icon={<Lock size={18} />}
-                  label={t('settings.appLock')}
-                  value={userSettings?.appLockEnabled ? t('settings.on') : t('settings.off')}
-                  onClick={() => void handleAppLockToggle()}
                 />
               </SettingsGroup>
 

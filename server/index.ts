@@ -90,6 +90,27 @@ if (!smtpConfigured) {
   console.log('SMTP 未配置，邮箱验证码将以开发模式输出到日志。');
 }
 
+// 常用货币符号（服务端提醒邮件用，未收录时回退货币代码）
+const CURRENCY_SYMBOLS_SERVER: Record<string, string> = {
+  USD: '$', CNY: '¥', EUR: '€', GBP: '£', JPY: '¥', HKD: 'HK$', TWD: 'NT$', KRW: '₩',
+  SGD: 'S$', AUD: 'A$', NZD: 'NZ$', CAD: 'C$', CHF: 'CHF', INR: '₹', RUB: '₽',
+  TRY: '₺', BRL: 'R$', MXN: 'Mex$', THB: '฿', MYR: 'RM', PHP: '₱', VND: '₫', SEK: 'kr'
+};
+const currencySymbolServer = (code: string): string => CURRENCY_SYMBOLS_SERVER[code] || `${code} `;
+
+// 到期提醒专用发件账号（alert@），未配置时回退主发件账号
+const ALERT_FROM = process.env.SMTP_ALERT_FROM || 'DingYue <alert@ngaasiu.studio>';
+const ALERT_USER = process.env.SMTP_ALERT_USER || '';
+const ALERT_PASS = process.env.SMTP_ALERT_PASS || '';
+const alertMailer = ALERT_USER && ALERT_PASS
+  ? nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_SECURE,
+      auth: { user: ALERT_USER, pass: ALERT_PASS }
+    })
+  : mailer;
+
 // 通行密钥（Passkey / WebAuthn）：rpID 必须与访问域名一致（本地开发是 localhost），
 // 生产环境请在 .env 设置 PASSKEY_RP_ID=ngaasiu.studio 和 PASSKEY_EXPECTED_ORIGINS。
 const PASSKEY_RP_ID = process.env.PASSKEY_RP_ID || 'localhost';
@@ -552,6 +573,19 @@ async function ensureDatabaseSchema() {
     MODIFY purpose ENUM('register', 'reset_password', 'change_email') NOT NULL
   `);
 
+  // 订阅到期提醒防重表（每个订阅每个提醒日只发一次）
+  await pool.execute(`
+    CREATE TABLE IF NOT EXISTS subscription_reminders (
+      id BIGINT AUTO_INCREMENT PRIMARY KEY,
+      subscription_id VARCHAR(36) NOT NULL,
+      user_id INT NOT NULL,
+      remind_date DATE NOT NULL,
+      days_before INT NOT NULL,
+      sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uniq_subscription_reminder (subscription_id, remind_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+  `);
+
   // Passkey (WebAuthn) credentials.
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS webauthn_credentials (
@@ -940,6 +974,123 @@ const renderVerificationCodeEmailHtml = (code: string, purposeText: string) => `
   </table>
 </body>
 </html>`;
+
+// 订阅到期提醒邮件（与验证码同风格的紫头卡片），由 alert@ 发出
+const renderBillingReminderEmailHtml = (subName: string, daysBefore: number, dueDate: string, priceText: string) => `
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:28px 12px;background:#ffffff;font-family:-apple-system,'PingFang SC','Helvetica Neue','Microsoft YaHei',sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #ece6f7;border-radius:20px;overflow:hidden;box-shadow:0 6px 24px rgba(124,77,196,0.12);">
+    <tr>
+      <td bgcolor="#8f6bc8" style="background-image:linear-gradient(135deg,#a98be0 0%,#8f6bc8 60%,#7c55b8 100%);padding:30px 40px 26px;text-align:center;">
+        <div style="font-size:22px;font-weight:800;color:#ffffff;letter-spacing:0.5px;">DingYue 订阅管理助手</div>
+        <div style="font-size:12px;color:#e6dbf8;margin-top:6px;letter-spacing:2px;">SUBSCRIPTION MANAGER</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:30px 40px 0;text-align:center;">
+        <div style="font-size:23px;font-weight:700;color:#3c3350;">订阅到期提醒</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:22px 40px 8px;text-align:center;">
+        <div style="display:inline-block;background:#f4eefc;border-radius:16px;padding:18px 30px;max-width:100%;">
+          <span style="font-size:28px;font-weight:700;color:#9a6fd0;line-height:1.3;">${subName}</span>
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:14px 40px 8px;text-align:center;">
+        <div style="font-size:15px;color:#5b5470;line-height:1.8;">
+          该订阅将于 <b>${dueDate}</b>（${daysBefore} 天后）到期续费。<br>
+          ${priceText ? `到期金额：${priceText}<br>` : ''}
+          如果不再需要，请记得在到期前取消，避免自动扣费。
+        </div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:30px 40px 36px;">
+        <div style="border-top:1px solid #efe9f9;padding-top:20px;text-align:center;font-size:12px;color:#9d96ad;line-height:1.7;">
+          如需帮助，请联系 <a href="mailto:support@ngaasiu.studio" style="color:#8f6bc8;">support@ngaasiu.studio</a><br>
+          本邮件由 DingYue 自动发送。
+        </div>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+// 每日到期提醒扫描：对到期前 15/7/3 天的订阅向账户邮箱发提醒，
+// subscription_reminders 表（订阅+日期唯一）保证同一订阅同一提醒日只发一次。
+const REMINDER_DAYS_BEFORE = [15, 7, 3];
+const runBillingReminders = async (): Promise<number> => {
+  if (!alertMailer || !smtpConfigured) return 0;
+  const [rows]: any = await pool.query(
+    `SELECT s.id AS sub_id, s.name, s.next_billing_date, s.price, s.currency, s.billing_cycle,
+            s.user_id, u.email
+     FROM subscriptions s
+     JOIN users u ON u.id = s.user_id
+     WHERE s.next_billing_date IS NOT NULL
+       AND s.status IN ('normal', 'trial')
+       AND s.next_billing_date IN
+         (CURDATE() + INTERVAL 15 DAY, CURDATE() + INTERVAL 7 DAY, CURDATE() + INTERVAL 3 DAY)`
+  );
+  if (!Array.isArray(rows) || rows.length === 0) return 0;
+
+  let sent = 0;
+  for (const row of rows) {
+    if (!row.email || isPlaceholderEmail(row.email)) continue;
+    const remindDate = String(row.next_billing_date).slice(0, 10);
+    const daysBefore = Math.round(
+      (new Date(remindDate).getTime() - new Date(new Date().toDateString()).getTime()) / 86400000
+    );
+    const [insertResult]: any = await pool.query(
+      `INSERT IGNORE INTO subscription_reminders (subscription_id, user_id, remind_date, days_before)
+       VALUES (?, ?, ?, ?)`,
+      [row.sub_id, row.user_id, remindDate, daysBefore]
+    );
+    if (!insertResult || insertResult.affectedRows === 0) continue;
+
+    const monthly = row.billing_cycle === 'annually' ? Number(row.price) / 12 : Number(row.price);
+    const priceText = Number(row.price) > 0
+      ? `${currencySymbolServer(row.currency)}${Number(row.price).toFixed(2)}${row.billing_cycle === 'annually' ? ' / 年' : ' / 月'}`
+      : '';
+    const [y, m, d] = remindDate.split('-');
+    const dueDateCN = `${y} 年 ${Number(m)} 月 ${Number(d)} 日`;
+    try {
+      await alertMailer.sendMail({
+        from: ALERT_FROM,
+        to: row.email,
+        subject: `【DingYue】「${row.name}」将于 ${daysBefore} 天后到期`,
+        html: renderBillingReminderEmailHtml(
+          row.name,
+          daysBefore,
+          dueDateCN,
+          priceText
+        ),
+        text: `你的订阅「${row.name}」将于 ${remindDate}（${daysBefore} 天后）到期${priceText ? '，金额 ' + priceText : ''}。如不再需要请记得取消。`
+      });
+      sent += 1;
+    } catch (error) {
+      // 发送失败时清除防重记录，下轮重试
+      await pool.query('DELETE FROM subscription_reminders WHERE subscription_id = ? AND remind_date = ?', [row.sub_id, remindDate]);
+      console.error('Billing reminder send failed:', error instanceof Error ? error.message : error);
+    }
+  }
+  return sent;
+};
+
+// 每小时整点后跑一次扫描（提醒日期由 SQL 精确匹配，防重表保证不重复发送）
+const scheduleBillingReminders = () => {
+  const tick = () => {
+    void runBillingReminders()
+      .then((sent) => { if (sent > 0) console.log(`Billing reminders sent: ${sent}`); })
+      .catch((e) => console.error('Billing reminder scan failed:', e.message));
+  };
+  setTimeout(tick, 45 * 1000);
+  setInterval(tick, 60 * 60 * 1000);
+};
 
 const sendVerificationCodeEmail = async (email: string, code: string, purpose: CodePurpose) => {
   const purposeText = CODE_PURPOSE_LABELS[purpose];
@@ -1406,39 +1557,86 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 });
 
-// POST /api/auth/google
-app.post('/api/auth/google', async (req, res) => {
-  const { credential } = req.body;
-  if (!credential) {
-    return res.status(400).json({ error: '缺少 Google 凭证' });
+// Google 登录共用的账号落库逻辑（id_token / access_token / code 三种凭证殊途同归）
+const finishGoogleLogin = async (
+  googleId: string,
+  email: string,
+  name: string
+) => {
+  const [rows]: any = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+  let user = rows[0];
+  if (!user) {
+    await pool.execute(
+        'INSERT INTO users (email, name, google_id, google_name) VALUES (?, ?, ?, ?)',
+        [email, name, googleId, name]
+    );
+    const [newRows]: any = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
+    user = newRows[0];
+  } else if (!user.google_id) {
+    // 已存在的邮箱/密码账户首次使用 Google 登录时，补充关联 google_id
+    await pool.execute('UPDATE users SET google_id = ?, google_name = ? WHERE id = ?', [googleId, name, user.id]);
+    user.google_id = googleId;
   }
+  return user;
+};
+
+// POST /api/auth/google — 三种凭证任选其一：
+//   credential:   GIS 的 id_token（Web GIS / 原生 SDK）
+//   accessToken:  Google OAuth 隐式流程的 access_token（网页端自定义按钮）
+//   code+redirectUri: 授权码（桌面端整窗 OAuth，服务端用 secret 换取）
+app.post('/api/auth/google', async (req, res) => {
+  const { credential, accessToken, code, redirectUri } = req.body;
   try {
-    const ticket = await googleClient.verifyIdToken({
-      idToken: credential,
-      audience: GOOGLE_CLIENT_ID
-    });
-    const payload = ticket.getPayload();
+    let payload: any = null;
+
+    if (credential) {
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: GOOGLE_CLIENT_ID
+      });
+      payload = ticket.getPayload();
+    } else if (accessToken) {
+      const uiRes = await directFetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const ui: any = await uiRes.json();
+      if (!ui?.sub) {
+        return res.status(400).json({ error: 'Google 凭证无效' });
+      }
+      payload = { sub: ui.sub, email: ui.email, name: ui.name };
+    } else if (code) {
+      const clientSecret = process.env.GOOGLE_CLIENT_SECRET || '';
+      if (!clientSecret) {
+        return res.status(501).json({ error: 'Google 桌面登录暂未配置，请使用其他方式登录' });
+      }
+      const tokenRes = await directFetch('https://oauth2.googleapis.com/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          code: String(code),
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: clientSecret,
+          redirect_uri: String(redirectUri || 'https://ngaasiu.studio/'),
+          grant_type: 'authorization_code'
+        }).toString()
+      });
+      const tokenData: any = await tokenRes.json();
+      if (!tokenData.id_token) {
+        return res.status(400).json({ error: 'Google 授权码无效: ' + (tokenData.error_description || tokenData.error || '未知错误') });
+      }
+      const ticket = await googleClient.verifyIdToken({
+        idToken: tokenData.id_token,
+        audience: GOOGLE_CLIENT_ID
+      });
+      payload = ticket.getPayload();
+    } else {
+      return res.status(400).json({ error: '缺少 Google 凭证' });
+    }
+
     if (!payload?.email) {
       return res.status(400).json({ error: 'Google 账户未返回邮箱信息' });
     }
-    const email = payload.email;
-    const name = payload.name || payload.email;
-    const googleId = payload.sub;
-
-    const [rows]: any = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
-    let user = rows[0];
-    if (!user) {
-      await pool.execute(
-          'INSERT INTO users (email, name, google_id, google_name) VALUES (?, ?, ?, ?)',
-          [email, name, googleId, name]
-      );
-      const [newRows]: any = await pool.execute('SELECT * FROM users WHERE email = ?', [email]);
-      user = newRows[0];
-    } else if (!user.google_id) {
-      // 已存在的邮箱/密码账户首次使用 Google 登录时，补充关联 google_id
-      await pool.execute('UPDATE users SET google_id = ?, google_name = ? WHERE id = ?', [googleId, name, user.id]);
-      user.google_id = googleId;
-    }
+    const user = await finishGoogleLogin(payload.sub, payload.email, payload.name || payload.email);
     res.json(buildAuthResponse(user));
   } catch (e: any) {
     res.status(400).json({ error: 'Google 登录失败: ' + e.message });
@@ -3121,6 +3319,7 @@ app.post('/api/membership/restore', authRequired, async (req: AuthenticatedReque
 const startServer = async () => {
   try {
     await ensureDatabaseSchema();
+    scheduleBillingReminders();
     app.listen(port, () => {
       console.log(`Server running at http://localhost:${port}`);
       console.log('Using MySQL database backend.');

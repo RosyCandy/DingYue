@@ -4,7 +4,17 @@ import { api, resolveAssetUrl } from '../lib/api';
 import { Subscription } from '../constants';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
+
+// 统计/时间线里的分类显示翻译（存库值英文/自定义名）
+const CATEGORY_I18N: Record<string, string> = {
+  Entertainment: 'cat.entertainment', Video: 'cat.video', AI: 'cat.ai',
+  Development: 'cat.development', Electronics: 'cat.electronics',
+  Productivity: 'cat.productivity', Software: 'cat.software',
+  Lifestyle: 'cat.lifestyle', Finance: 'cat.finance'
+};
 import { ACTIVE_CURRENCIES, getCurrencySymbol, FALLBACK_RATES, DEFAULT_CURRENCY } from '../lib/currencies';
+
+const translateCategoryName = (name: string): string => name;
 
 const CURRENCY_STORAGE_KEY = 'display_currency';
 
@@ -17,6 +27,10 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const [currencySearch, setCurrencySearch] = useState('');
   const { t } = useI18n();
+  const translateCategoryName = (name: string): string => {
+    const key = CATEGORY_I18N[name];
+    return key ? t(key) : name;
+  };
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -85,10 +99,56 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
 
   const expiringSoon = subscriptions.filter(s => s.status === 'urgent');
 
-  // Sort subscriptions by next billing date for the timeline
-  const timelineSubscriptions = [...subscriptions].sort((a, b) =>
-    new Date(a.nextBillingDate).getTime() - new Date(b.nextBillingDate).getTime()
-  );
+  // 时间线：始终从今天延伸 3 年。订阅按周期展开成未来账单日（精确到日），
+  // 没有订阅账单的季度以季度刻度补位（精确到月），保证时间轴连续不空白。
+  const timeline = React.useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const horizon = new Date(today);
+    horizon.setFullYear(horizon.getFullYear() + 3);
+
+    type TimelineEvent = { date: Date; sub?: (typeof subscriptions)[number]; quarter?: boolean };
+    const events: TimelineEvent[] = [];
+
+    // 1) 订阅账单日按周期展开
+    const subEvents: Array<{ date: Date; sub: (typeof subscriptions)[number] }> = [];
+    for (const sub of subscriptions) {
+      if (sub.status === 'expired') continue;
+      if (!sub.nextBillingDate) continue;
+      let d = new Date(sub.nextBillingDate);
+      if (isNaN(d.getTime())) continue;
+      d.setHours(0, 0, 0, 0);
+      let guard = 0;
+      while (d <= horizon && guard < 60) {
+        if (d >= today) subEvents.push({ date: new Date(d), sub });
+        d = new Date(d);
+        if ((sub.billingCycle || 'monthly') === 'annually') d.setFullYear(d.getFullYear() + 1);
+        else d.setMonth(d.getMonth() + 1);
+        guard += 1;
+      }
+    }
+
+    // 2) 季度刻度：仅补位没有订阅事件的季度
+    const quarterStarts: Date[] = [];
+    let q = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3 + 3, 1);
+    while (q <= horizon) {
+      quarterStarts.push(new Date(q));
+      q = new Date(q.getFullYear(), q.getMonth() + 3, 1);
+    }
+    for (const qs of quarterStarts) {
+      const quarterEnd = new Date(qs.getFullYear(), qs.getMonth() + 3, 1);
+      const hasSubEvent = subEvents.some((e) => e.date >= qs && e.date < quarterEnd);
+      if (!hasSubEvent) events.push({ date: qs, quarter: true });
+    }
+
+    // 3) 今天节点（始终最上）
+    events.push({ date: new Date(today), quarter: false, sub: undefined });
+
+    // 4) 订阅事件加入并整体排序；同一天的多个订阅按添加顺序（数组原序）
+    events.push(...subEvents.map((e) => ({ date: e.date, sub: e.sub })));
+    events.sort((a, b) => a.date.getTime() - b.date.getTime());
+    return events;
+  }, [subscriptions]);
 
   const activePaidSubs = subscriptions.filter(s => s.status !== 'trial');
   const trialSubs = subscriptions.filter(s => s.status === 'trial');
@@ -246,58 +306,86 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
           <h2 className="text-xl font-bold tracking-tight px-1">{t('dashboard.timeline')}</h2>
         </div>
 
-        {timelineSubscriptions.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-outline-variant/40 bg-surface-container-low px-5 py-8 text-center">
-            <p className="font-semibold text-on-surface">{t('dashboard.timelineEmpty')}</p>
-            <p className="mt-1 text-sm text-on-surface-variant">{t('dashboard.timelineEmptyHint')}</p>
-          </div>
-        ) : (
-          <div className="relative border-l-2 border-outline-variant/20 ml-2 space-y-4 py-2">
-            {timelineSubscriptions.map((sub) => {
-            const date = sub.nextBillingDate ? new Date(sub.nextBillingDate) : new Date();
+        <div className="relative border-l-2 border-outline-variant/20 ml-2 space-y-4 py-2">
+          {timeline.map((event, index) => {
+            const date = event.date;
             const month = date.toLocaleString('default', { month: 'short' });
             const day = date.getDate();
+            const yearLabel = date.getFullYear();
+            const isToday = index === 0;
 
+            // 季度刻度节点：小灰点 + 月份标签
+            if (event.quarter) {
+              return (
+                <div key={`q-${date.getTime()}-${index}`} className="relative pl-4">
+                  <div className="absolute -left-[7px] top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-surface-container-high border-2 border-surface"></div>
+                  <div className="py-1.5 text-sm text-on-surface-variant font-medium">
+                    {yearLabel}{t('dashboard.year')} {date.getMonth() + 1}{t('dashboard.month')}
+                  </div>
+                </div>
+              );
+            }
+
+            // 订阅事件节点：账单卡（同一天多个订阅按添加顺序依次排列）
+            if (event.sub) {
+              const sub = event.sub;
+              return (
+                <div key={`${sub.id}-${date.getTime()}-${index}`} className="relative pl-4">
+                  <div className="absolute -left-[9px] top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-primary border-4 border-surface shadow-sm"></div>
+
+                  <div className="bg-surface-container-lowest rounded-2xl p-3 border border-outline-variant/10 shadow-sm flex items-center gap-3">
+                    <div className="flex flex-col items-center justify-center w-10 shrink-0 bg-primary/5 rounded-xl py-1.5 text-primary">
+                      <span className="text-[10px] font-bold uppercase">{month}</span>
+                      <span className="text-base font-black leading-none">{day}</span>
+                    </div>
+
+                    <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-container-low shrink-0 flex items-center justify-center">
+                      {sub.icon ? (
+                          <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      ) : (
+                          <span className="text-xs font-bold text-primary uppercase">
+                            {sub.name ? sub.name.charAt(0) : '?'}
+                          </span>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <h3 className="font-bold text-on-surface text-sm truncate">{sub.name}</h3>
+                      <p className="text-[10px] text-on-surface-variant truncate">
+                        {translateCategoryName(sub.category)} · {isToday ? t('dashboard.today') : yearLabel}
+                      </p>
+                    </div>
+
+                    <div className="text-right shrink-0">
+                      <p className="font-bold text-on-surface text-sm">
+                        {(Number(sub.price) || 0) > 0
+                          ? `${getCurrencySymbol(sub.currency)}${(Number(sub.price) || 0).toFixed(2)}`
+                          : t('dashboard.free')}
+                      </p>
+                      <p className="text-[8px] text-on-surface-variant uppercase tracking-wider mt-0.5">
+                        {sub.billingCycle === 'monthly' ? t('dashboard.month') : t('dashboard.year')}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            // 今天节点
             return (
-              <div key={sub.id} className="relative pl-4">
-                {/* Timeline Dot */}
+              <div key={`today-${index}`} className="relative pl-4">
                 <div className="absolute -left-[9px] top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-primary border-4 border-surface shadow-sm"></div>
-
-                <div className="bg-surface-container-lowest rounded-2xl p-3 border border-outline-variant/10 shadow-sm flex items-center gap-3">
-                  <div className="flex flex-col items-center justify-center w-10 shrink-0 bg-primary/5 rounded-xl py-1.5 text-primary">
+                <div className="bg-primary/5 rounded-2xl p-3 flex items-center gap-3">
+                  <div className="flex flex-col items-center justify-center w-10 shrink-0 bg-primary/10 rounded-xl py-1.5 text-primary">
                     <span className="text-[10px] font-bold uppercase">{month}</span>
                     <span className="text-base font-black leading-none">{day}</span>
                   </div>
-
-                  <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-container-low shrink-0 flex items-center justify-center">
-                    {sub.icon ? (
-                        <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                        <span className="text-xs font-bold text-primary uppercase">
-                          {sub.name ? sub.name.charAt(0) : '?'}
-                        </span>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-on-surface text-sm truncate">{sub.name}</h3>
-                    <p className="text-[10px] text-on-surface-variant truncate">{sub.category}</p>
-                  </div>
-
-                  <div className="text-right shrink-0">
-                    <p className="font-bold text-on-surface text-sm">
-                      {getCurrencySymbol(sub.currency)}{(Number(sub.price) || 0).toFixed(2)}
-                    </p>
-                    <p className="text-[8px] text-on-surface-variant uppercase tracking-wider mt-0.5">
-                      {sub.billingCycle === 'monthly' ? t('dashboard.month') : t('dashboard.year')}
-                    </p>
-                  </div>
+                  <span className="text-sm font-bold text-primary">{t('dashboard.today')}</span>
                 </div>
               </div>
             );
-            })}
-          </div>
-        )}
+          })}
+        </div>
       </section>
     </div>
   );

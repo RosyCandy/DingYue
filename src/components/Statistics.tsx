@@ -1,9 +1,23 @@
 import React from 'react';
-import { BarChart, Bar, XAxis, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
+import { BarChart, Bar, XAxis, ResponsiveContainer, Cell, PieChart, Pie, CartesianGrid } from 'recharts';
 import { TrendingUp, Lightbulb, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 import { api, StatsOverview } from '../lib/api';
+import { getCurrencySymbol, FALLBACK_RATES } from '../lib/currencies';
+import { useAuth } from '../lib/auth';
+
+// 统计接口返回的分类值为存库英文/自定义名，展示时翻译默认分类
+const translateCategory = (name: string, t: (k: string) => string): string => {
+  const map: Record<string, string> = {
+    Entertainment: 'cat.entertainment', Video: 'cat.video', AI: 'cat.ai',
+    Development: 'cat.development', Electronics: 'cat.electronics',
+    Productivity: 'cat.productivity', Software: 'cat.software',
+    Lifestyle: 'cat.lifestyle', Finance: 'cat.finance'
+  };
+  const key = map[name];
+  return key ? t(key) : name;
+};
 
 export default function Statistics() {
   const [timeRange, setTimeRange] = React.useState<'monthly' | 'annual'>('annual');
@@ -11,6 +25,15 @@ export default function Statistics() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const { t } = useI18n();
+  const { user } = useAuth();
+  const [rates] = React.useState<Record<string, number>>(FALLBACK_RATES);
+  const displayCurrency = localStorage.getItem('display_currency') || 'USD';
+  const currencySymbol = getCurrencySymbol(displayCurrency);
+  // 统计接口的金额以 USD 为基准，展示时按首页选定的货币换算
+  const convertFromUsd = (usd: number): number => {
+    const rate = rates[displayCurrency] || 1;
+    return usd * rate;
+  };
 
   const loadStats = async () => {
     try {
@@ -113,7 +136,7 @@ export default function Statistics() {
               <p className="text-sm text-on-surface-variant">{t('stats.yearlyProjection')}</p>
             </div>
             <div className="text-right">
-              <span className="text-2xl font-bold text-primary">${stats.totalYearlyForecast.toFixed(2)}</span>
+              <span className="text-2xl font-bold text-primary">{currencySymbol}{convertFromUsd(stats.totalYearlyForecast).toFixed(2)}</span>
               <p className="text-xs text-on-surface-variant">{t('stats.totalYearlyForecast')}</p>
             </div>
           </div>
@@ -121,6 +144,7 @@ export default function Statistics() {
           <div className="h-64 w-full mt-4">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e3e6ef" />
                 <XAxis 
                   dataKey="name" 
                   axisLine={false} 
@@ -151,7 +175,7 @@ export default function Statistics() {
             <h3 className="text-xl font-bold leading-tight">{t('stats.futureForecast')}</h3>
             <p className="text-sm opacity-80 mt-2">
               {t('stats.nextCycleForecast')
-                .replace('{amount}', stats.monthlyForecast.toFixed(2))
+                .replace('{amount}', convertFromUsd(stats.monthlyForecast).toFixed(2))
                 .replace('{count}', String(stats.activeSubscriptions))}
             </p>
           </div>
@@ -172,6 +196,19 @@ export default function Statistics() {
         {/* Category Breakdown */}
         <div className="md:col-span-6 bg-surface-container-lowest rounded-xl p-6 shadow-sm">
           <h3 className="text-lg font-bold text-on-surface mb-6">{t('stats.categoryBreakdown')}</h3>
+          {stats.categoryBreakdown.length === 0 ? (
+            <div className="space-y-3">
+              {/* 空态基准条：有基准线避免整块空白 */}
+              <div className="flex items-center gap-3">
+                <div className="w-2.5 h-2.5 rounded-full bg-surface-container-high shrink-0"></div>
+                <div className="flex-1 bg-surface-container-low h-3 rounded-full overflow-hidden">
+                  <div className="h-full w-[4%] bg-surface-container-high rounded-full"></div>
+                </div>
+                <span className="text-xs text-on-surface-variant font-medium shrink-0">0%</span>
+              </div>
+              <p className="text-xs text-on-surface-variant pt-2">{t('stats.categoryEmptyHint')}</p>
+            </div>
+          ) : (
           <div className="flex items-center gap-8">
             <div className="relative w-40 h-40">
               <ResponsiveContainer width="100%" height="100%">
@@ -199,30 +236,42 @@ export default function Statistics() {
                 <div key={item.name} className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }}></div>
-                    <span className="text-sm font-medium text-on-surface-variant">{item.name}</span>
+                    <span className="text-sm font-medium text-on-surface-variant">{translateCategory(item.name, t)}</span>
                   </div>
                   <span className="text-sm font-bold">{item.value.toFixed(1)}%</span>
                 </div>
               ))}
             </div>
           </div>
+          )}
         </div>
 
         {/* Account Comparison */}
         <div className="md:col-span-6 bg-surface-container-lowest rounded-xl p-6 shadow-sm">
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-lg font-bold text-on-surface">{t('stats.accountComparison')}</h3>
-            <span className="text-xs text-on-surface-variant font-medium">{t('stats.perAppleId')}</span>
+            <span className="text-xs text-on-surface-variant font-medium">{t('stats.perAccount')}</span>
           </div>
           <div className="space-y-6">
+            {stats.accountComparison.length === 0 && (
+              /* 空态基准条：显示当前登录账户 */
+              <AccountProgress
+                label={user?.name || user?.email || t('stats.currentAccount')}
+                amount={0}
+                percentage={4}
+                color="bg-surface-container-high"
+                initial={(user?.name || user?.email || 'U').charAt(0).toUpperCase()}
+              />
+            )}
             {stats.accountComparison.map((item, index) => (
               <div key={item.label}>
                 <AccountProgress
                   label={item.label}
-                  amount={item.amount}
+                  amount={convertFromUsd(item.amount)}
                   percentage={Math.max(5, item.percentage)}
                   color={['bg-indigo-500', 'bg-teal-500', 'bg-amber-500', 'bg-rose-500', 'bg-cyan-500'][index % 5]}
                   initial={item.initial}
+                  symbol={currencySymbol}
                 />
               </div>
             ))}
@@ -243,7 +292,7 @@ export default function Statistics() {
                 <span className="font-semibold">{stats.optimization.category || t('stats.stackedPlans')}</span>
                 :
                 {' '}
-                <span className="text-primary font-bold">${stats.optimization.potentialSavings.toFixed(2)} {t('stats.perMonth')}</span>
+                <span className="text-primary font-bold">{currencySymbol}{convertFromUsd(stats.optimization.potentialSavings).toFixed(2)} {t('stats.perMonth')}</span>
               </p>
             </div>
             <button className="text-primary font-bold text-sm px-4 py-2 hover:bg-white rounded-lg transition-colors whitespace-nowrap">{t('stats.reviewDetails')}</button>
@@ -254,7 +303,7 @@ export default function Statistics() {
   );
 }
 
-function AccountProgress({ label, amount, percentage, color, initial }: { label: string, amount: number, percentage: number, color: string, initial: string }) {
+function AccountProgress({ label, amount, percentage, color, initial, symbol = '$' }: { label: string, amount: number, percentage: number, color: string, initial: string, symbol?: string }) {
   const { t } = useI18n();
 
   return (
@@ -266,7 +315,7 @@ function AccountProgress({ label, amount, percentage, color, initial }: { label:
           </div>
           <span className="text-sm font-semibold">{label}</span>
         </div>
-        <span className="text-sm font-bold text-on-surface">${amount}{t('account.perMonth')}</span>
+        <span className="text-sm font-bold text-on-surface">{symbol}{amount}{t('account.perMonth')}</span>
       </div>
       <div className="w-full bg-surface-container-low h-3 rounded-full overflow-hidden">
         <div className={cn("h-full rounded-full", color)} style={{ width: `${percentage}%` }}></div>

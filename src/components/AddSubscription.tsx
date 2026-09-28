@@ -3,8 +3,10 @@ import { X, PlusCircle, CloudUpload, ChevronRight, Share2, Calendar, Clock, Arro
 import { motion, AnimatePresence } from 'motion/react';
 import IconSelection from './IconSelection';
 import { useI18n } from '../lib/i18n';
+import { cn } from '../lib/utils';
 import { useBackHandler } from '../lib/backButton';
 import { api } from '../lib/api';
+import { ACTIVE_CURRENCIES, getCurrencySymbol } from '../lib/currencies';
 import { Subscription } from '../constants';
 
 interface AddSubscriptionProps {
@@ -26,7 +28,13 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
   const [source, setSource] = useState(initialData?.source || 'Apple App Store');
   const [account, setAccount] = useState(initialData?.account || '');
   const [price, setPrice] = useState(initialData?.price || '');
-  const [currency, setCurrency] = useState(initialData?.currency || 'USD');
+  // 默认货币跟随首页的展示货币选择；编辑时用订阅原货币
+  const [currency, setCurrency] = useState(
+    initialData?.currency || localStorage.getItem('display_currency') || 'USD'
+  );
+  // 免费订阅：金额置 0，但仍保留续期日期与到期提醒
+  const [isFree, setIsFree] = useState(Number(initialData?.price) === 0 && Boolean(initialData));
+  const [customCategories, setCustomCategories] = useState<Array<{ id: number; name: string }>>([]);
   const [cycle, setCycle] = useState<'monthly' | 'annually'>(
     initialData?.billingCycle === 'annually' || initialData?.billing_cycle === 'annually' ? 'annually' : 'monthly'
   );
@@ -37,6 +45,12 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
   );
   const [selectedIcon, setSelectedIcon] = useState<string | null>(initialData?.icon || null);
 
+  useEffect(() => {
+    void api.getCustomCategories()
+      .then((list) => setCustomCategories(list.map((c) => ({ id: c.id, name: c.name }))))
+      .catch(() => {});
+  }, []);
+
   const handleSave = async () => {
     try {
       if (!name.trim()) {
@@ -45,7 +59,7 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
       }
 
       setLoading(true);
-      const normalizedPrice = Number(price);
+      const normalizedPrice = isFree ? 0 : Number(price);
       const subData: Omit<Subscription, 'id'> = {
         name,
         category,
@@ -157,12 +171,23 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                           value={category}
                           onChange={(e) => setCategory(e.target.value)}
                         >
-                          {/* 存库值保持英文，显示按语言翻译 */}
+                          {/* 存库值保持英文/自定义名，显示按语言翻译 */}
                           <option value="Entertainment">{t('cat.entertainment')}</option>
+                          <option value="Video">{t('cat.video')}</option>
+                          <option value="AI">{t('cat.ai')}</option>
+                          <option value="Development">{t('cat.development')}</option>
+                          <option value="Electronics">{t('cat.electronics')}</option>
                           <option value="Productivity">{t('cat.productivity')}</option>
                           <option value="Software">{t('cat.software')}</option>
                           <option value="Lifestyle">{t('cat.lifestyle')}</option>
                           <option value="Finance">{t('cat.finance')}</option>
+                          {customCategories.length > 0 && (
+                            <optgroup label={t('subs.customCategories')}>
+                              {customCategories.map((c) => (
+                                <option key={c.id} value={c.name}>{c.name}</option>
+                              ))}
+                            </optgroup>
+                          )}
                         </select>
                         <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={20} />
                       </div>
@@ -220,17 +245,42 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
 
               {/* Financials */}
               <section className="space-y-4">
-                <div className="bg-surface-container-low p-6 rounded-xl">
+                <div className="bg-surface-container-low p-6 rounded-xl space-y-5">
+                  {/* 免费订阅开关：金额置 0，续期日期与到期提醒仍然生效 */}
+                  <label className="flex items-center justify-between cursor-pointer">
+                    <span className="text-sm font-semibold text-on-surface">{t('add.freeSubscription')}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = !isFree;
+                        setIsFree(next);
+                        if (next) setPrice('0');
+                      }}
+                      className={cn(
+                        'relative w-11 h-6 rounded-full transition-colors',
+                        isFree ? 'bg-primary' : 'bg-outline-variant/40'
+                      )}
+                      aria-pressed={isFree}
+                    >
+                      <span
+                        className={cn(
+                          'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all',
+                          isFree ? 'left-[22px]' : 'left-0.5'
+                        )}
+                      ></span>
+                    </button>
+                  </label>
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <div className="md:col-span-2 space-y-2">
                       <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.amount')}</label>
                       <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary font-bold">$</span>
+                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary font-bold">{getCurrencySymbol(currency)}</span>
                         <input 
-                          className="w-full bg-surface-container-lowest border-none rounded-lg py-4 pl-10 pr-4 focus:ring-2 focus:ring-primary/20 shadow-sm text-xl font-bold" 
+                          className="w-full bg-surface-container-lowest border-none rounded-lg py-4 pl-10 pr-4 focus:ring-2 focus:ring-primary/20 shadow-sm text-xl font-bold disabled:opacity-50" 
                           placeholder="0.00" 
                           step="0.01" 
                           type="number"
+                          disabled={isFree}
                           value={price}
                           onChange={(e) => setPrice(e.target.value)}
                         />
@@ -242,17 +292,18 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                         <select 
                           className="w-full bg-surface-container-lowest border-none rounded-lg p-4 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm font-semibold"
                           value={currency}
+                          disabled={isFree}
                           onChange={(e) => setCurrency(e.target.value)}
                         >
-                          <option>USD</option>
-                          <option>EUR</option>
-                          <option>GBP</option>
-                          <option>JPY</option>
+                          {ACTIVE_CURRENCIES.map((c) => (
+                            <option key={c.code} value={c.code}>{c.code} {c.symbol}</option>
+                          ))}
                         </select>
                         <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={20} />
                       </div>
                     </div>
                   </div>
+                  <p className="text-xs text-on-surface-variant px-1">{t('add.freeHint')}</p>
                 </div>
               </section>
 

@@ -11,7 +11,7 @@ import { useI18n } from './lib/i18n';
 import { useAuth } from './lib/auth';
 import LoginPage from './components/LoginPage';
 import LandingPage from './components/LandingPage';
-import { api, buildApiUrl } from './lib/api';
+import { api, buildApiUrl, SITE_ORIGIN } from './lib/api';
 import { useTheme } from './lib/theme';
 import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, getOAuthCallbackUri, getCzlCallbackUri, SOCIAL_BIND_RESULT_KEY, SOCIAL_BIND_NAV_KEY, SOCIAL_LOGIN_ERROR_KEY, type SocialOAuthProvider } from './lib/socialAuth';
 import { useAndroidBackButton } from './lib/backButton';
@@ -138,20 +138,23 @@ export default function App() {
     const webRedirectUri = (provider: SocialOAuthProvider): string => {
       if (provider === 'czl') return getCzlCallbackUri();
       if (provider === 'github' || provider === 'gitee') return getOAuthCallbackUri();
+      if (provider === 'google') return `${SITE_ORIGIN}/`;
       return `${window.location.origin}/`;
     };
     void (async () => {
       try {
         if (callback.bind) {
-          const provider = callback.provider === 'czl' ? 'wechat' : callback.provider;
-          if (provider === 'qq') throw new Error('暂不支持绑定该方式');
+          // 绑定流程仅支持 wechat(CZL)/github/gitee；google 走登录页内的专用绑定
+          const provider: 'wechat' | 'github' | 'gitee' =
+            callback.provider === 'gitee' ? 'gitee' : callback.provider === 'github' ? 'github' : 'wechat';
           await api.bindSocialProvider(provider, callback.code, webRedirectUri(callback.provider));
           sessionStorage.setItem(SOCIAL_BIND_RESULT_KEY, JSON.stringify({ ok: true }));
           sessionStorage.setItem(SOCIAL_BIND_NAV_KEY, 'social');
           setActiveTab('settings');
           return;
         }
-        const res = await fetch(buildApiUrl(`/auth/${callback.provider}`), {
+        const endpoint = callback.provider === 'google' ? '/auth/google' : `/auth/${callback.provider}`;
+        const res = await fetch(buildApiUrl(endpoint), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code: callback.code, redirectUri: webRedirectUri(callback.provider) })
