@@ -1,10 +1,11 @@
-// DingYue 桌面版主进程：加载应用内置界面（dist/，与移动端同一套本地资源），
+// DingYue 桌面版主进程：加载应用内置界面（desktop-files/dist/，与移动端同一套本地资源），
 // 离线也能秒开登录页；API 请求走公网地址（构建时注入 dist）。
 // OAuth 授权（GitHub/Gitee/微信/Google）在窗口内跳转完成，授权回调被拦截
 // 转回本地界面消费 code，全程不跳系统浏览器。
-const { app, BrowserWindow, shell, Menu } = require('electron');
+const { app, BrowserWindow, shell, Menu, protocol, net } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 
 const SITE_ORIGIN = 'https://ngaasiu.studio';
 // OAuth 授权链路域名：在应用内窗口导航
@@ -30,14 +31,18 @@ const isAllowed = (url) => {
   }
 };
 
-let mainWindow = null;
+// 本地界面的根目录（打包后在 asar 内，开发态在项目根）
+const UI_ROOT = fs.existsSync(path.join(__dirname, '..', 'desktop-files', 'dist'))
+  ? path.join(__dirname, '..', 'desktop-files', 'dist')
+  : path.join(__dirname, '..', '..', 'dist');
 
-function indexHtml() {
-  // 打包后 dist 在 asar 内；开发态在项目根
-  const packaged = path.join(__dirname, '..', 'desktop-files', 'dist', 'index.html');
-  if (fs.existsSync(packaged)) return packaged;
-  return path.join(__dirname, '..', '..', 'dist', 'index.html');
-}
+// 自定义 app:// 协议：file:// 下 ES Module 会被 CORS 拦截导致界面永远停在启动页，
+// 必须以 privileged standard scheme 提供本地资源（支持相对路径/模块脚本/localStorage）
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'app', privileges: { standard: true, secure: true, supportFetchAPI: true } },
+]);
+
+let mainWindow = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -54,8 +59,7 @@ function createWindow() {
     },
   });
 
-  // 本地界面：离线秒开登录页；API 请求走构建时注入的公网地址
-  void mainWindow.loadFile(indexHtml());
+  void mainWindow.loadURL('app://index.html');
 
   mainWindow.on('page-title-updated', (event) => event.preventDefault());
 
@@ -65,7 +69,7 @@ function createWindow() {
     if (CALLBACK_PAGES.some((prefix) => url.startsWith(prefix))) {
       event.preventDefault();
       const query = url.split('?')[1] || '';
-      mainWindow.loadFile(indexHtml(), { search: query ? `?${query}` : '' });
+      mainWindow.loadURL(`app://index.html${query ? `?${query}` : ''}`);
       return;
     }
     if (!isAllowed(url)) {
@@ -92,6 +96,21 @@ app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 
 app.whenReady().then(() => {
+  // app://index.html → dist/index.html；app://assets/xxx → dist/assets/xxx
+  protocol.handle('app', (request) => {
+    try {
+      let pathname = decodeURIComponent(new URL(request.url).pathname);
+      if (pathname === '/' || pathname === '') pathname = '/index.html';
+      const filePath = path.join(UI_ROOT, pathname);
+      if (!filePath.startsWith(UI_ROOT)) {
+        return new Response('forbidden', { status: 403 });
+      }
+      return net.fetch(pathToFileURL(filePath).toString());
+    } catch {
+      return new Response('not found', { status: 404 });
+    }
+  });
+
   Menu.setApplicationMenu(null);
   createWindow();
   app.on('activate', () => {
