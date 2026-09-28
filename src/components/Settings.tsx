@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   User, Bell, HelpCircle, LogOut, ChevronRight, ChevronDown, RefreshCw, Palette, Languages,
-  X, Check, Loader2, Info, Mail, ArrowLeft, Fingerprint, Trash2,
+  X, Check, Loader2, Info, Mail, ArrowLeft, Fingerprint, Trash2, Pencil, ShieldCheck,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Language, useI18n } from '../lib/i18n';
@@ -11,7 +11,7 @@ import NotificationCenter from './NotificationCenter';
 import SocialLoginPage from './SocialLoginPage';
 import { useBackHandler } from '../lib/backButton';
 import { useAuth } from '../lib/auth';
-import { api, resolveAssetUrl, HelpArticle, LocalizedText, SecurityOverview, UserSettings } from '../lib/api';
+import { api, resolveAssetUrl, HelpArticle, LocalizedText, PasskeyItem, SecurityOverview, UserSettings } from '../lib/api';
 import { SOCIAL_BIND_NAV_KEY } from '../lib/socialAuth';
 import { registerPasskey, isPasskeyUserCancellation, isPasskeyAlreadyRegistered } from '../lib/passkey';
 import { version as appVersion } from '../../package.json';
@@ -69,13 +69,19 @@ export default function Settings() {
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [savingPassword, setSavingPassword] = useState(false);
   const [addingPasskey, setAddingPasskey] = useState(false);
+  // V1.3.6 通行密钥列表管理
+  const [passkeys, setPasskeys] = useState<PasskeyItem[] | null>(null);
+  const [passkeysLoading, setPasskeysLoading] = useState(false);
+  const [renamingId, setRenamingId] = useState<number | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [savingProfileName, setSavingProfileName] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
   const { language, setLanguage, t } = useI18n();
   const { theme, setTheme } = useTheme();
-  const { user, login, logout, updateUser } = useAuth();
+  const { user, login, logout, updateUser, token } = useAuth();
 
   const goBack = () => setView(VIEW_PARENT[view]);
   useBackHandler(goBack, view !== 'main');
@@ -135,6 +141,13 @@ export default function Settings() {
       }
     })();
     return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view]);
+
+  // V1.3.6：进入通行密钥页时加载凭据列表
+  useEffect(() => {
+    if (view !== 'passkey') return;
+    void refreshPasskeys();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view]);
 
@@ -250,11 +263,27 @@ export default function Settings() {
   const handleAddPasskey = async () => {
     setActionError('');
     setActionNotice('');
+    // 桌面端（Electron）：app:// origin 通不过 WebAuthn 的 rpID 校验，
+    // 经桥接子窗口在真实站点 origin 下完成（V1.3.5 Windows 一直失败的根因）
+    const isDesktopApp = /Electron/i.test(navigator.userAgent);
     try {
       setAddingPasskey(true);
-      const result = await registerPasskey();
+      let result: { verified: boolean; passkeyCount: number };
+      if (isDesktopApp) {
+        const { openDesktopBridge } = await import('../lib/desktopBridge');
+        const bridgeResult = await openDesktopBridge<{ ok: boolean; passkeyCount?: number; cancelled?: boolean; error?: string }>('passkey', { token: token || undefined });
+        if (!bridgeResult) return; // 用户关闭了桥接窗口，静默取消
+        if (!bridgeResult.ok) {
+          if (bridgeResult.cancelled) return;
+          throw new Error(bridgeResult.error || 'Failed to add passkey');
+        }
+        result = { verified: true, passkeyCount: bridgeResult.passkeyCount || 0 };
+      } else {
+        result = await registerPasskey();
+      }
       setSecurityOverview((prev) => (prev ? { ...prev, passkeyCount: result.passkeyCount } : prev));
       setActionNotice(t('settings.passkeyAdded'));
+      await refreshPasskeys();
     } catch (err) {
       if (isPasskeyUserCancellation(err)) {
         // 用户取消或超时，静默处理
@@ -265,6 +294,47 @@ export default function Settings() {
       }
     } finally {
       setAddingPasskey(false);
+    }
+  };
+
+  const refreshPasskeys = async () => {
+    try {
+      setPasskeysLoading(true);
+      setPasskeys(await api.listPasskeys());
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to load passkeys');
+    } finally {
+      setPasskeysLoading(false);
+    }
+  };
+
+  const handleRenamePasskey = async (id: number) => {
+    const label = renameValue.trim();
+    if (!label) return;
+    try {
+      setPasskeysLoading(true);
+      setPasskeys(await api.renamePasskey(id, label));
+      setRenamingId(null);
+      setActionNotice(t('settings.passkeyRenamed'));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to rename passkey');
+    } finally {
+      setPasskeysLoading(false);
+    }
+  };
+
+  const handleDeletePasskey = async (id: number) => {
+    try {
+      setPasskeysLoading(true);
+      const next = await api.deletePasskey(id);
+      setPasskeys(next);
+      setSecurityOverview((prev) => (prev ? { ...prev, passkeyCount: next.length } : prev));
+      setDeletingId(null);
+      setActionNotice(t('settings.passkeyDeleted'));
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to delete passkey');
+    } finally {
+      setPasskeysLoading(false);
     }
   };
 
@@ -544,9 +614,105 @@ export default function Settings() {
           <div>
             <SubPageHeader title={t('settings.passkey')} onBack={goBack} />
             <div className="space-y-4 pt-2">
-              <p className="text-sm text-on-surface-variant px-2">
-                {securityOverview ? String(securityOverview.passkeyCount) : '0'}
-              </p>
+              {/* 已添加的通行密钥列表：自定义命名、编辑、删除 */}
+              <div className="space-y-2">
+                {passkeysLoading && (
+                  <div className="flex items-center justify-center py-6">
+                    <Loader2 size={20} className="animate-spin text-primary" />
+                  </div>
+                )}
+                {!passkeysLoading && passkeys && passkeys.map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-surface-container-low rounded-xl px-3 py-3 flex items-center gap-3"
+                  >
+                    <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <Fingerprint size={18} className="text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {renamingId === item.id ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            autoFocus
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') void handleRenamePasskey(item.id);
+                              if (e.key === 'Escape') setRenamingId(null);
+                            }}
+                            maxLength={64}
+                            className="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-surface-container-lowest outline-none text-sm font-semibold focus:ring-2 focus:ring-primary/30"
+                          />
+                          <button
+                            onClick={() => void handleRenamePasskey(item.id)}
+                            className="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center active:scale-90 transition-transform"
+                            aria-label={t('settings.renamePasskey')}
+                          >
+                            <Check size={14} />
+                          </button>
+                          <button
+                            onClick={() => setRenamingId(null)}
+                            className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center active:scale-90 transition-transform"
+                            aria-label="cancel"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="text-sm font-bold text-on-surface truncate">{item.label}</p>
+                          <p className="text-[11px] text-on-surface-variant mt-0.5 truncate">
+                            {t('settings.passkeyAddedOn')} {new Date(item.createdAt).toLocaleDateString()}
+                            {item.lastUsedAt ? ` · ${t('settings.passkeyLastUsed')} ${new Date(item.lastUsedAt).toLocaleDateString()}` : ''}
+                          </p>
+                        </>
+                      )}
+                    </div>
+                    {renamingId !== item.id && deletingId !== item.id && (
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => { setRenamingId(item.id); setRenameValue(item.label); }}
+                          className="w-9 h-9 rounded-full flex items-center justify-center text-on-surface-variant hover:bg-surface-container-high active:scale-90 transition-all"
+                          aria-label={t('settings.renamePasskey')}
+                        >
+                          <Pencil size={15} />
+                        </button>
+                        <button
+                          onClick={() => setDeletingId(item.id)}
+                          className="w-9 h-9 rounded-full flex items-center justify-center text-red-500 hover:bg-red-500/10 active:scale-90 transition-all"
+                          aria-label={t('settings.deletePasskey')}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                    )}
+                    {deletingId === item.id && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-[11px] font-semibold text-red-500">{t('settings.deletePasskeyConfirm')}</span>
+                        <button
+                          onClick={() => void handleDeletePasskey(item.id)}
+                          className="px-3 h-8 rounded-full bg-red-500 text-white text-xs font-bold active:scale-95 transition-transform"
+                        >
+                          {t('settings.deletePasskeyYes')}
+                        </button>
+                        <button
+                          onClick={() => setDeletingId(null)}
+                          className="px-3 h-8 rounded-full bg-surface-container-high text-xs font-bold active:scale-95 transition-transform"
+                        >
+                          {t('settings.deletePasskeyNo')}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {!passkeysLoading && passkeys && passkeys.length === 0 && (
+                  <div className="text-center py-8 space-y-2">
+                    <ShieldCheck size={28} className="mx-auto text-on-surface-variant/40" />
+                    <p className="text-xs text-on-surface-variant">{t('settings.passkeyEmpty')}</p>
+                  </div>
+                )}
+              </div>
+
               <button
                 onClick={() => void handleAddPasskey()}
                 disabled={addingPasskey}

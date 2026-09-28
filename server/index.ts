@@ -259,9 +259,11 @@ const normalizeCategoryColor = (value: unknown): string => {
   return /^#[0-9a-fA-F]{6}$/.test(color) ? color : '#0054cd';
 };
 
-const sanitizeAccountName = (value: string | null | undefined): string => {
+const sanitizeAccountName = (value: string | null | undefined, fallbackEmail = ''): string => {
   const name = String(value || '').trim();
-  return name || 'Unassigned Account';
+  // V1.3.6：未填写账户的订阅不再显示 "Unassigned Account"，
+  // 归入用户登录邮箱（与订阅页的账户过滤逻辑一致）
+  return name || fallbackEmail.trim() || 'Unassigned Account';
 };
 
 const computeDaysUntil = (dateText: string | null | undefined): number | null => {
@@ -604,6 +606,25 @@ async function ensureDatabaseSchema() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
   `);
 
+  // V1.3.6：通行密钥自定义命名（label）与最近使用时间（last_used_at），
+  // 支持设置页展示具体凭据列表、重命名和删除。老库平滑加列。
+  const [passkeyColumns]: any = await pool.query(
+    `SELECT COLUMN_NAME
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'webauthn_credentials'`
+  );
+  const passkeyColumnNames = new Set(
+    Array.isArray(passkeyColumns)
+      ? passkeyColumns.map((row: { COLUMN_NAME: string }) => row.COLUMN_NAME)
+      : []
+  );
+  if (!passkeyColumnNames.has('label')) {
+    await pool.execute("ALTER TABLE webauthn_credentials ADD COLUMN label VARCHAR(64) NULL AFTER backed_up");
+  }
+  if (!passkeyColumnNames.has('last_used_at')) {
+    await pool.execute("ALTER TABLE webauthn_credentials ADD COLUMN last_used_at DATETIME NULL AFTER label");
+  }
+
   // Legacy-data safeguard: if the project has only one user, bind old subscriptions with NULL user_id to that user.
   const [userRows]: any = await pool.query('SELECT id FROM users ORDER BY id ASC');
   if (Array.isArray(userRows) && userRows.length === 1) {
@@ -638,11 +659,11 @@ const ensureUserSettingsRow = async (userId: number) => {
   );
 };
 
-const buildAccountSummary = (subscriptions: SubscriptionRow[]) => {
+const buildAccountSummary = (subscriptions: SubscriptionRow[], ownerEmail = '') => {
   const map = new Map<string, { name: string; monthlyTotal: number; subscriptionCount: number; nextPaymentDate: string | null }>();
 
   subscriptions.forEach((sub) => {
-    const name = sanitizeAccountName(sub.account);
+    const name = sanitizeAccountName(sub.account, ownerEmail);
     const current = map.get(name) || {
       name,
       monthlyTotal: 0,
@@ -723,7 +744,7 @@ const buildCategorySummary = (
     }));
 };
 
-const buildStatsOverview = (subscriptions: SubscriptionRow[]) => {
+const buildStatsOverview = (subscriptions: SubscriptionRow[], ownerEmail = '') => {
   const monthlyForecast = subscriptions.reduce((acc, sub) => acc + toMonthlyAmount(sub), 0);
   const totalYearlyForecast = monthlyForecast * 12;
   const now = new Date();
@@ -769,7 +790,7 @@ const buildStatsOverview = (subscriptions: SubscriptionRow[]) => {
     color: item.color
   }));
 
-  const accountTotals = buildAccountSummary(subscriptions);
+  const accountTotals = buildAccountSummary(subscriptions, ownerEmail);
   const maxAccountTotal = accountTotals.reduce((max, item) => Math.max(max, item.monthlyTotal), 0);
   const accountComparison = accountTotals.map((item) => ({
     label: item.name,
@@ -2180,7 +2201,7 @@ app.get('/api/accounts/summary', authRequired, async (req: AuthenticatedRequest,
   try {
     const userId = req.user!.userId;
     const subscriptions = await fetchUserSubscriptions(userId);
-    const accounts = buildAccountSummary(subscriptions);
+    const accounts = buildAccountSummary(subscriptions, req.user!.email);
     res.json({ accounts, subscriptions });
   } catch (error: any) {
     console.error('Error fetching account summary:', error);
@@ -2389,10 +2410,121 @@ app.get('/api/stats/overview', authRequired, async (req: AuthenticatedRequest, r
   try {
     const userId = req.user!.userId;
     const subscriptions = await fetchUserSubscriptions(userId);
-    const overview = buildStatsOverview(subscriptions);
+    const overview = buildStatsOverview(subscriptions, req.user!.email);
     res.json(overview);
   } catch (error: any) {
     console.error('Error fetching stats overview:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// V1.3.6 真实账单趋势（统计页年/月/日选择器数据源）
+//
+// 旧版 trendData 是按 next_billing_date 推的"未来 12 个月预测值"，且月度
+// 视图只截取了含当前月的 6 个月——这就是"一年只有 4-9 月"的根因。
+// 现改为以每个订阅的账单锚点（next_billing_date，缺失退回 created_at）向
+// 过去/未来按周期展开出真实账单日序列：
+//   • 年视图：所选年 1-12 月逐月账单合计（未来月份标记 forecast）
+//   • 月视图：所选月 1-31 日逐日账单（月合计 = 日合计）
+// 展开不早于订阅的 created_at（添加之前的账单不追溯）。
+// ─────────────────────────────────────────────
+const expandBillingDates = (
+  sub: SubscriptionRow,
+  rangeStart: Date,
+  rangeEnd: Date
+): Date[] => {
+  const anchorRaw = sub.next_billing_date && !Number.isNaN(new Date(sub.next_billing_date).getTime())
+    ? new Date(sub.next_billing_date)
+    : null;
+  const created = new Date(sub.created_at);
+  if (Number.isNaN(created.getTime())) return [];
+  // 锚点无效（无 next_billing_date）时，以创建日当期账单日近似
+  const anchor = anchorRaw && anchorRaw.getTime() > created.getTime() ? anchorRaw : created;
+  anchor.setHours(0, 0, 0, 0);
+
+  const stepMonths = sub.billing_cycle === 'annually' ? 12 : 1;
+  const dates: Date[] = [];
+
+  // 以「年+月」偏移生成与锚点同日的账单日，避免 setMonth 溢出（1/31 + 1月 → 3/3）
+  const shift = (d: Date, months: number): Date => {
+    const target = new Date(d);
+    const day = target.getDate();
+    target.setDate(1);
+    target.setMonth(target.getMonth() + months);
+    // 月末溢出保护：目标月天数不足时取该月最后一天
+    const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+    target.setDate(Math.min(day, lastDay));
+    target.setHours(0, 0, 0, 0);
+    return target;
+  };
+
+  // 向过去展开（不早于 created 与 rangeStart 的较大者）
+  const earliest = created.getTime() > rangeStart.getTime() ? created : rangeStart;
+  for (let k = 0; ; k++) {
+    const date = shift(anchor, -k * stepMonths);
+    if (date.getTime() < earliest.getTime()) break;
+    if (date.getTime() <= rangeEnd.getTime()) dates.push(date);
+    if (k > 1200) break; // 保险丝：100 年
+  }
+  // 向未来展开（到 rangeEnd 为止）
+  for (let k = 1; ; k++) {
+    const date = shift(anchor, k * stepMonths);
+    if (date.getTime() > rangeEnd.getTime()) break;
+    dates.push(date);
+    if (k > 1200) break;
+  }
+  return dates.sort((a, b) => a.getTime() - b.getTime());
+};
+
+app.get('/api/stats/trend', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const now = new Date();
+    const year = Math.min(Math.max(Number(req.query.year) || now.getFullYear(), 1970), 2999);
+    const month = req.query.month !== undefined
+      ? Math.min(Math.max(Number(req.query.month), 1), 12)
+      : null;
+
+    const subscriptions = await fetchUserSubscriptions(req.user!.userId);
+    const rangeStart = month
+      ? new Date(year, month - 1, 1)
+      : new Date(year, 0, 1);
+    const rangeEnd = month
+      ? new Date(year, month, 0, 23, 59, 59)
+      : new Date(year, 11, 31, 23, 59, 59);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const monthTotals = new Array(12).fill(0);
+    const daysInMonth = month ? new Date(year, month, 0).getDate() : 0;
+    const dayTotals = new Array(daysInMonth).fill(0);
+
+    subscriptions.forEach((sub) => {
+      const price = parsePrice(sub.price);
+      expandBillingDates(sub, rangeStart, rangeEnd).forEach((date) => {
+        if (date.getFullYear() !== year) return;
+        monthTotals[date.getMonth()] += price;
+        if (month && date.getMonth() === month - 1) {
+          dayTotals[date.getDate() - 1] += price;
+        }
+      });
+    });
+
+    const months = monthTotals.map((value, index) => ({
+      label: MONTH_LABELS[index],
+      value: Number(value.toFixed(2)),
+      // 未来月（1 日晚于今天）标记为预测值，前端虚化显示；当月算实际
+      forecast: new Date(year, index, 1) > today
+    }));
+    const days = dayTotals.map((value, index) => ({
+      label: String(index + 1),
+      value: Number(value.toFixed(2)),
+      forecast: new Date(year, month! - 1, index + 1) > today
+    }));
+
+    res.json({ year, month, months, days });
+  } catch (error: any) {
+    console.error('Error fetching stats trend:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2957,11 +3089,18 @@ app.post('/api/webauthn/register/verify', authRequired, async (req: Authenticate
       return res.status(400).json({ error: '通行密钥验证失败' });
     }
     const { credential, credentialDeviceType, credentialBackedUp } = verification.registrationInfo;
+    // V1.3.6：支持自定义命名；未命名时按已有序号生成默认名（如「通行密钥 2」）
+    const [existingRows]: any = await pool.query(
+      'SELECT COUNT(*) AS count FROM webauthn_credentials WHERE user_id = ?',
+      [userId]
+    );
+    const nextIndex = Number(existingRows?.[0]?.count || 0) + 1;
+    const label = String(req.body?.label || '').trim().slice(0, 64) || `通行密钥 ${nextIndex}`;
     await pool.execute(
       `INSERT INTO webauthn_credentials
-         (user_id, credential_id, credential_public_key, counter, transports, device_type, backed_up)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE counter = VALUES(counter), user_id = VALUES(user_id)`,
+         (user_id, credential_id, credential_public_key, counter, transports, device_type, backed_up, label)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE counter = VALUES(counter), user_id = VALUES(user_id), label = VALUES(label)`,
       [
         userId,
         credential.id,
@@ -2969,7 +3108,8 @@ app.post('/api/webauthn/register/verify', authRequired, async (req: Authenticate
         credential.counter,
         (credential.transports || []).join(','),
         credentialDeviceType,
-        credentialBackedUp
+        credentialBackedUp,
+        label
       ]
     );
     const [countRows]: any = await pool.query(
@@ -3031,7 +3171,7 @@ app.post('/api/webauthn/auth/verify', async (req, res) => {
       return res.status(400).json({ error: '通行密钥验证失败' });
     }
     await pool.execute(
-      'UPDATE webauthn_credentials SET counter = ? WHERE id = ?',
+      'UPDATE webauthn_credentials SET counter = ?, last_used_at = NOW() WHERE id = ?',
       [verification.authenticationInfo.newCounter, stored.id]
     );
     const [userRows]: any = await pool.query('SELECT * FROM users WHERE id = ? LIMIT 1', [stored.user_id]);
@@ -3039,6 +3179,87 @@ app.post('/api/webauthn/auth/verify', async (req, res) => {
   } catch (error: any) {
     console.error('WebAuthn auth verify error:', error);
     res.status(400).json({ error: '通行密钥登录失败: ' + error.message });
+  }
+});
+
+// ─────────────────────────────────────────────
+// V1.3.6 通行密钥凭据管理（列表 / 重命名 / 删除）
+// ─────────────────────────────────────────────
+const PASSKEY_LIST_SQL = `
+  SELECT id, label, device_type, backed_up, created_at, last_used_at
+  FROM webauthn_credentials
+  WHERE user_id = ?
+  ORDER BY created_at ASC
+`;
+
+app.get('/api/webauthn/credentials', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const [rows]: any = await pool.query(PASSKEY_LIST_SQL, [req.user!.userId]);
+    res.json((Array.isArray(rows) ? rows : []).map((row: any) => ({
+      id: Number(row.id),
+      label: String(row.label || '').trim() || '通行密钥',
+      deviceType: row.device_type || null,
+      backedUp: Boolean(row.backed_up),
+      createdAt: row.created_at,
+      lastUsedAt: row.last_used_at || null
+    })));
+  } catch (error: any) {
+    console.error('WebAuthn list credentials error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.patch('/api/webauthn/credentials/:id', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = Number(req.params.id);
+    const label = String(req.body?.label || '').trim().slice(0, 64);
+    if (!id || !label) {
+      return res.status(400).json({ error: '名称不能为空' });
+    }
+    const [result]: any = await pool.execute(
+      'UPDATE webauthn_credentials SET label = ? WHERE id = ? AND user_id = ?',
+      [label, id, req.user!.userId]
+    );
+    if (result?.affectedRows === 0) {
+      return res.status(404).json({ error: '通行密钥不存在' });
+    }
+    const [rows]: any = await pool.query(PASSKEY_LIST_SQL, [req.user!.userId]);
+    res.json((Array.isArray(rows) ? rows : []).map((row: any) => ({
+      id: Number(row.id),
+      label: String(row.label || '').trim() || '通行密钥',
+      deviceType: row.device_type || null,
+      backedUp: Boolean(row.backed_up),
+      createdAt: row.created_at,
+      lastUsedAt: row.last_used_at || null
+    })));
+  } catch (error: any) {
+    console.error('WebAuthn rename credential error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/webauthn/credentials/:id', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [result]: any = await pool.execute(
+      'DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?',
+      [id, req.user!.userId]
+    );
+    if (result?.affectedRows === 0) {
+      return res.status(404).json({ error: '通行密钥不存在' });
+    }
+    const [rows]: any = await pool.query(PASSKEY_LIST_SQL, [req.user!.userId]);
+    res.json((Array.isArray(rows) ? rows : []).map((row: any) => ({
+      id: Number(row.id),
+      label: String(row.label || '').trim() || '通行密钥',
+      deviceType: row.device_type || null,
+      backedUp: Boolean(row.backed_up),
+      createdAt: row.created_at,
+      lastUsedAt: row.last_used_at || null
+    })));
+  } catch (error: any) {
+    console.error('WebAuthn delete credential error:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

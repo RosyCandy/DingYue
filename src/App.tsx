@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { LayoutGrid, ReceiptText, BarChart3, Settings as SettingsIcon, Plus } from 'lucide-react';
 import { cn } from './lib/utils';
 import Dashboard from './components/Dashboard';
@@ -218,11 +218,19 @@ export default function App() {
     () => !user && !isDesktopApp && sessionStorage.getItem('landing_entered') !== '1'
   );
 
+  // 桌面桥接子窗口（?bridge=google / passkey）：本窗口只负责在真实站点 origin 下
+  // 完成特定操作，强制渲染登录页承载桥接逻辑，跳过落地页与已登录态。
+  const isBridgeWindow = useMemo(
+    () => new URLSearchParams(window.location.search).has('bridge'),
+    []
+  );
+
   const enterApp = () => {
     sessionStorage.setItem('landing_entered', '1');
     setLandingVisible(false);
   };
 
+  if (isBridgeWindow) return <LoginPage />;
   if (!user && landingVisible) return <LandingPage onEnter={enterApp} />;
   if (!user) return <LoginPage />;
 

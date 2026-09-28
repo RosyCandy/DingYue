@@ -11,6 +11,8 @@ export interface Subscription {
   region: string;
   status: 'normal' | 'urgent' | 'trial' | 'expired';
   daysLeft?: number;
+  // V1.3.6：时间线回溯历史账单、通行密钥列表等需要创建时间
+  createdAt?: string;
 }
 
 export const MOCK_SUBSCRIPTIONS: Subscription[] = [

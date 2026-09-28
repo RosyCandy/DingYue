@@ -14,7 +14,11 @@ const CATEGORY_I18N: Record<string, string> = {
 };
 import { ACTIVE_CURRENCIES, getCurrencySymbol, FALLBACK_RATES, DEFAULT_CURRENCY } from '../lib/currencies';
 
-const translateCategoryName = (name: string): string => name;
+// 时间线里的分类显示翻译（存库值英文/自定义名；V1.3.6 修复恒等函数未翻译的问题）
+const translateCategoryName = (name: string, t: (k: string) => string): string => {
+  const key = CATEGORY_I18N[name];
+  return key ? t(key) : name;
+};
 
 const CURRENCY_STORAGE_KEY = 'display_currency';
 
@@ -27,10 +31,6 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
   const [currencySearch, setCurrencySearch] = useState('');
   const { t } = useI18n();
-  const translateCategoryName = (name: string): string => {
-    const key = CATEGORY_I18N[name];
-    return key ? t(key) : name;
-  };
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -99,41 +99,60 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
 
   const expiringSoon = subscriptions.filter(s => s.status === 'urgent');
 
-  // 时间线：始终从今天延伸 3 年。订阅按周期展开成未来账单日（精确到日），
-  // 没有订阅账单的季度以季度刻度补位（精确到月），保证时间轴连续不空白。
+  // V1.3.6 时间线：过去 3 年 → 今天，今天置顶、下滑看更早的历史。
+  // （旧版是今天 → 未来 3 年，方向反了。）
+  // 订阅按周期把历史账单日往回展开（精确到日，不早于订阅创建日——添加之前的
+  // 账单不追溯），没有订阅账单的季度以季度刻度补位（精确到月）。
+  // 懒加载：一次性渲染 3 年节点太长，初始只渲染最近的节点，滚动接近底部再加载。
   const timeline = React.useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const horizon = new Date(today);
-    horizon.setFullYear(horizon.getFullYear() + 3);
+    const origin = new Date(today);
+    origin.setFullYear(origin.getFullYear() - 3);
 
     type TimelineEvent = { date: Date; sub?: (typeof subscriptions)[number]; quarter?: boolean };
     const events: TimelineEvent[] = [];
 
-    // 1) 订阅账单日按周期展开
+    // 1) 订阅历史账单日：从 next_billing_date（未来最近的账单日）往回按周期推
     const subEvents: Array<{ date: Date; sub: (typeof subscriptions)[number] }> = [];
     for (const sub of subscriptions) {
-      if (sub.status === 'expired') continue;
-      if (!sub.nextBillingDate) continue;
-      let d = new Date(sub.nextBillingDate);
-      if (isNaN(d.getTime())) continue;
-      d.setHours(0, 0, 0, 0);
+      const anchorRaw = sub.nextBillingDate ? new Date(sub.nextBillingDate) : null;
+      if (anchorRaw && isNaN(anchorRaw.getTime())) continue;
+      const created = (sub as any).createdAt ? new Date((sub as any).createdAt) : null;
+      // 展开下限：不早于订阅创建日（有 createdAt 时），也不早于 3 年前
+      let floorDate = origin;
+      if (created && !isNaN(created.getTime()) && created > origin) floorDate = created;
+
+      let anchor = anchorRaw && anchorRaw > today ? anchorRaw : (created && !isNaN(created.getTime()) ? created : today);
+      anchor = new Date(anchor);
+      anchor.setHours(0, 0, 0, 0);
+
+      const stepMonths = (sub.billingCycle || 'monthly') === 'annually' ? 12 : 1;
+      const dayOfMonth = anchor.getDate();
       let guard = 0;
-      while (d <= horizon && guard < 60) {
-        if (d >= today) subEvents.push({ date: new Date(d), sub });
-        d = new Date(d);
-        if ((sub.billingCycle || 'monthly') === 'annually') d.setFullYear(d.getFullYear() + 1);
-        else d.setMonth(d.getMonth() + 1);
+      let d = new Date(anchor);
+      while (d.getTime() >= floorDate.getTime() && guard < 40) {
+        if (d <= today && sub.status !== 'expired') {
+          subEvents.push({ date: new Date(d), sub });
+        }
+        // 往回退一个周期（保月末：2月无30日时取月末）
+        const target = new Date(d);
+        target.setDate(1);
+        target.setMonth(target.getMonth() - stepMonths);
+        const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
+        target.setDate(Math.min(dayOfMonth, lastDay));
+        target.setHours(0, 0, 0, 0);
+        d = target;
         guard += 1;
       }
     }
 
-    // 2) 季度刻度：仅补位没有订阅事件的季度
+    // 2) 季度刻度：仅补位没有订阅事件的季度（过去 3 年内）
     const quarterStarts: Date[] = [];
-    let q = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3 + 3, 1);
-    while (q <= horizon) {
+    let q = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1);
+    while (q >= origin) {
       quarterStarts.push(new Date(q));
-      q = new Date(q.getFullYear(), q.getMonth() + 3, 1);
+      q = new Date(q.getFullYear(), q.getMonth() - 3, 1);
     }
     for (const qs of quarterStarts) {
       const quarterEnd = new Date(qs.getFullYear(), qs.getMonth() + 3, 1);
@@ -144,11 +163,23 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
     // 3) 今天节点（始终最上）
     events.push({ date: new Date(today), quarter: false, sub: undefined });
 
-    // 4) 订阅事件加入并整体排序；同一天的多个订阅按添加顺序（数组原序）
+    // 4) 订阅事件加入并整体倒序（新的在上）；同一天的多个订阅按添加顺序
     events.push(...subEvents.map((e) => ({ date: e.date, sub: e.sub })));
-    events.sort((a, b) => a.date.getTime() - b.date.getTime());
+    events.sort((a, b) => b.date.getTime() - a.date.getTime());
     return events;
   }, [subscriptions]);
+
+  // 懒加载：初始渲染最近 30 个节点，滚动接近底部时追加更早的历史
+  const [visibleCount, setVisibleCount] = React.useState(30);
+  const visibleTimeline = timeline.slice(0, visibleCount);
+  React.useEffect(() => {
+    const onScroll = () => {
+      const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 600;
+      if (nearBottom) setVisibleCount((c) => Math.min(c + 30, timeline.length));
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [timeline.length]);
 
   const activePaidSubs = subscriptions.filter(s => s.status !== 'trial');
   const trialSubs = subscriptions.filter(s => s.status === 'trial');
@@ -300,14 +331,15 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
         />
       </section>
 
-      {/* Timeline View */}
+      {/* Timeline View — V1.3.6：过去 3 年 → 今天，今天置顶，下滑看历史 */}
       <section className="space-y-4">
         <div className="flex justify-between items-end">
           <h2 className="text-xl font-bold tracking-tight px-1">{t('dashboard.timeline')}</h2>
+          <span className="text-[11px] font-semibold text-on-surface-variant/70 px-1">{t('dashboard.timelineHint')}</span>
         </div>
 
         <div className="relative border-l-2 border-outline-variant/20 ml-2 space-y-4 py-2">
-          {timeline.map((event, index) => {
+          {visibleTimeline.map((event, index) => {
             const date = event.date;
             const month = date.toLocaleString('default', { month: 'short' });
             const day = date.getDate();
@@ -352,7 +384,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
                     <div className="flex-1 min-w-0">
                       <h3 className="font-bold text-on-surface text-sm truncate">{sub.name}</h3>
                       <p className="text-[10px] text-on-surface-variant truncate">
-                        {translateCategoryName(sub.category)} · {isToday ? t('dashboard.today') : yearLabel}
+                        {translateCategoryName(sub.category, t)} · {isToday ? t('dashboard.today') : yearLabel}
                       </p>
                     </div>
 

@@ -200,21 +200,15 @@ export function beginGithubLogin(bind = false): void {
   window.location.href = url;
 }
 
-// 桌面端（Electron）Google 登录：app:// origin 不符合 Google OAuth 政策（400 invalid_request），
-// 不能用 GIS 弹窗，改为整窗跳转 Google 授权码流程，回调到站点首页由桌面壳拦截转回本地。
-// 需要先在 Google Cloud Console 给 OAuth 客户端添加已授权重定向 URI：https://ngaasiu.studio/
-export function beginGoogleCodeLogin(): void {
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-  if (!clientId) return;
-  const params = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: `${SITE_ORIGIN}/`,
-    response_type: 'code',
-    scope: 'openid email profile',
-    state: buildOAuthState('google'),
-    prompt: 'select_account'
-  });
-  window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params.toString()}`;
+// 桌面端（Electron）Google 登录：app:// origin 不符合 Google OAuth 政策，
+// 授权码流程又依赖后端 client secret + 测试用户限制，均不可行。
+// 现改为「桥接窗口」：在应用内弹一个加载线上站点的子窗口，那里是真实的
+// https://ngaasiu.studio origin，用线上一直正常的 Web OAuth（GIS token 流）登录，
+// 成功后通过 postMessage 把令牌传回本地主窗口。全程无需 Google Console 改任何配置。
+// （桥接细节见 src/lib/desktopBridge.ts）
+export async function beginDesktopGoogleLogin(): Promise<{ token: string; user: any } | null> {
+  const { openDesktopBridge } = await import('./desktopBridge');
+  return openDesktopBridge<{ token: string; user: any }>('google');
 }
 
 // Gitee OAuth（标准授权码流程；原生端用内置浏览器 + 深链回调）

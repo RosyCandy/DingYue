@@ -288,6 +288,26 @@ const baseTranslations = {
     'stats.perMonth': '/month',
     'account.perMonth': '/mo',
 
+    // V1.3.6 statistics picker & timeline & passkeys
+    'stats.trendSwipeHint': 'Swipe left/right to switch month or year',
+    'stats.byYear': 'Year',
+    'stats.byMonth': 'Month',
+    'stats.yearUnit': '',
+    'stats.monthUnit': '',
+    'stats.rangeTotal': 'total',
+    'subs.perDay': '/day',
+    'dashboard.timelineHint': 'Last 3 years · newest first',
+    'settings.renamePasskey': 'Rename',
+    'settings.deletePasskey': 'Delete passkey',
+    'settings.deletePasskeyConfirm': 'Delete this passkey?',
+    'settings.deletePasskeyYes': 'Delete',
+    'settings.deletePasskeyNo': 'Cancel',
+    'settings.passkeyRenamed': 'Passkey renamed',
+    'settings.passkeyDeleted': 'Passkey deleted',
+    'settings.passkeyAddedOn': 'Added on',
+    'settings.passkeyLastUsed': 'last used',
+    'settings.passkeyEmpty': 'No passkeys yet. Add one for faster sign-in.',
+
     // Premium
   },
   '简体中文': {
@@ -569,6 +589,26 @@ const baseTranslations = {
     'stats.perMonth': '/月',
     'account.perMonth': '/月',
 
+    // V1.3.6 统计选择器 / 时间线 / 通行密钥
+    'stats.trendSwipeHint': '左右滑动切换月份或年份',
+    'stats.byYear': '年',
+    'stats.byMonth': '月',
+    'stats.yearUnit': '年',
+    'stats.monthUnit': '月',
+    'stats.rangeTotal': '合计',
+    'subs.perDay': '/天',
+    'dashboard.timelineHint': '过去 3 年 · 最新在上',
+    'settings.renamePasskey': '重命名',
+    'settings.deletePasskey': '删除通行密钥',
+    'settings.deletePasskeyConfirm': '删除这把通行密钥？',
+    'settings.deletePasskeyYes': '删除',
+    'settings.deletePasskeyNo': '取消',
+    'settings.passkeyRenamed': '通行密钥已重命名',
+    'settings.passkeyDeleted': '通行密钥已删除',
+    'settings.passkeyAddedOn': '添加于',
+    'settings.passkeyLastUsed': '最近使用',
+    'settings.passkeyEmpty': '还没有通行密钥，添加一把可以更快登录。',
+
     // Premium
   },
 };
@@ -832,6 +872,26 @@ const translations: Record<Language, Record<string, string>> = {
     'stats.perMonth': '/月',
     'account.perMonth': '/月',
 
+    // V1.3.6 統計選擇器 / 時間線 / 通行密鑰
+    'stats.trendSwipeHint': '左右滑動切換月份或年份',
+    'stats.byYear': '年',
+    'stats.byMonth': '月',
+    'stats.yearUnit': '年',
+    'stats.monthUnit': '月',
+    'stats.rangeTotal': '合計',
+    'subs.perDay': '/天',
+    'dashboard.timelineHint': '過去 3 年 · 最新在上',
+    'settings.renamePasskey': '重新命名',
+    'settings.deletePasskey': '刪除通行密鑰',
+    'settings.deletePasskeyConfirm': '刪除這把通行密鑰？',
+    'settings.deletePasskeyYes': '刪除',
+    'settings.deletePasskeyNo': '取消',
+    'settings.passkeyRenamed': '通行密鑰已重新命名',
+    'settings.passkeyDeleted': '通行密鑰已刪除',
+    'settings.passkeyAddedOn': '添加於',
+    'settings.passkeyLastUsed': '最近使用',
+    'settings.passkeyEmpty': '還沒有通行密鑰，添加一把可以更快登錄。',
+
   },
   Latin: {
     'social.boundAs': 'Coniunctum: {name}',
@@ -1084,6 +1144,26 @@ const translations: Record<Language, Record<string, string>> = {
     'stats.perMonth': '/mense',
     'account.perMonth': '/mens',
 
+    // V1.3.6 statisticarumlector / linea temporis / claves accessus
+    'stats.trendSwipeHint': 'Sinistram/dextram lapse ad mensem vel annum mutandum',
+    'stats.byYear': 'Annus',
+    'stats.byMonth': 'Mensis',
+    'stats.yearUnit': '',
+    'stats.monthUnit': '',
+    'stats.rangeTotal': 'summa',
+    'subs.perDay': '/die',
+    'dashboard.timelineHint': 'Superiora 3 anni · recentissima primum',
+    'settings.renamePasskey': 'Renominare',
+    'settings.deletePasskey': 'Clavem accessus delere',
+    'settings.deletePasskeyConfirm': 'Hanc clavem accessus delere?',
+    'settings.deletePasskeyYes': 'Delere',
+    'settings.deletePasskeyNo': 'Intermittere',
+    'settings.passkeyRenamed': 'Clavis accessus renominata est',
+    'settings.passkeyDeleted': 'Clavis accessus deleta est',
+    'settings.passkeyAddedOn': 'Addita die',
+    'settings.passkeyLastUsed': 'novissime usa',
+    'settings.passkeyEmpty': 'Nullae claves accessus adhuc. Adde unam celerius intrandi causa.',
+
   },
   한국어: {
     'social.boundAs': '연결됨: {name}',
@@ -1335,6 +1415,26 @@ const translations: Record<Language, Record<string, string>> = {
     'stats.stackedPlans': '중복 플랜',
     'stats.perMonth': '/월',
     'account.perMonth': '/월',
+
+    // V1.3.6 통계 선택기 / 타임라인 / 패스키
+    'stats.trendSwipeHint': '좌우로 밀어 월 또는 연도를 전환하세요',
+    'stats.byYear': '연',
+    'stats.byMonth': '월',
+    'stats.yearUnit': '년',
+    'stats.monthUnit': '월',
+    'stats.rangeTotal': '합계',
+    'subs.perDay': '/일',
+    'dashboard.timelineHint': '최근 3년 · 최신순',
+    'settings.renamePasskey': '이름 바꾸기',
+    'settings.deletePasskey': '패스키 삭제',
+    'settings.deletePasskeyConfirm': '이 패스키를 삭제할까요?',
+    'settings.deletePasskeyYes': '삭제',
+    'settings.deletePasskeyNo': '취소',
+    'settings.passkeyRenamed': '패스키 이름이 변경되었습니다',
+    'settings.passkeyDeleted': '패스키가 삭제되었습니다',
+    'settings.passkeyAddedOn': '추가일',
+    'settings.passkeyLastUsed': '최근 사용',
+    'settings.passkeyEmpty': '패스키가 없습니다. 추가하면 더 빠르게 로그인할 수 있어요.',
 
   },
 };

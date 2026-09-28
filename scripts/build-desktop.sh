@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-# 构建桌面安装包（dmg/exe/deb/rpm/AppImage）并复制到 ~/Desktop/DingYue-桌面版/
+# 构建桌面安装包（V1.3.6 起只打包实际使用的目标）：
+#   • macOS  Apple Silicon  dmg
+#   • Windows x64           exe (NSIS)
+# 在 macOS 本地运行；产物复制到 ~/Desktop/DingYue-桌面版/。
+# 重要：不再清空输出目录——旧版本安装包永久保留（文件名带版本号，互不覆盖）。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -13,24 +17,18 @@ VITE_API_BASE_URL="https://ngaasiu.studio/api" npm run build
 echo "==> 1.5/3 复制界面资源到打包目录（dist 是 electron-builder 保留目录名，需换名打包）"
 rm -rf desktop-files && mkdir -p desktop-files && cp -a dist desktop-files/dist
 
-echo "==> 2/3 electron-builder (mac + win + AppImage)"
-npx electron-builder -mw --config electron-builder.json
-find desktop-dist -name "* 2.*" -delete 2>/dev/null || true
-npx electron-builder --linux AppImage --x64 --config electron-builder.json
-npx electron-builder --linux AppImage --arm64 --config electron-builder.json
+echo "==> 2/3 electron-builder（mac arm64 dmg + win x64 NSIS）"
+npx electron-builder --mac dmg --arm64 --config electron-builder.json
+npx electron-builder --win nsis --x64 --config electron-builder.json
 
-echo "==> 3/3 deb（docker + dpkg-deb，x64 与 arm64）"
-docker run --rm -v "$PWD":/project -v /tmp/deb-build:/deb-build -w /project electronuserland/builder:20 \
-  /bin/bash -c "bash scripts/mkdeb.sh amd64 desktop-dist/linux-unpacked /project/desktop-dist && bash scripts/mkdeb.sh arm64 desktop-dist/linux-arm64-unpacked /project/desktop-dist"
+echo "==> 3/3 复制到桌面（保留所有历史版本，不覆盖不删除）"
+OUT_DIR="$HOME/Desktop/DingYue-桌面版"
+mkdir -p "$OUT_DIR"
+cp -n desktop-dist/DingYue-${VERSION}-mac.dmg "$OUT_DIR/" 2>/dev/null || \
+  cp desktop-dist/DingYue-${VERSION}-mac.dmg "$OUT_DIR/DingYue-${VERSION}-mac.dmg"
+cp -n desktop-dist/DingYue-${VERSION}-setup.exe "$OUT_DIR/" 2>/dev/null || \
+  cp desktop-dist/DingYue-${VERSION}-setup.exe "$OUT_DIR/DingYue-${VERSION}-setup.exe"
 
-mkdir -p ~/Desktop/DingYue-桌面版
-rm -f ~/Desktop/DingYue-桌面版/*
-cp desktop-dist/DingYue-${VERSION}-mac.dmg \
-   desktop-dist/DingYue-${VERSION}-setup.exe \
-   desktop-dist/DingYue-${VERSION}-amd64.deb \
-   desktop-dist/DingYue-${VERSION}-arm64.deb \
-   desktop-dist/DingYue-${VERSION}-x86_64.AppImage \
-   desktop-dist/DingYue-${VERSION}-arm64.AppImage \
-   ~/Desktop/DingYue-桌面版/
-ls -lh ~/Desktop/DingYue-桌面版/
-echo "✅ 桌面安装包 v${VERSION} 已更新到桌面"
+echo "==> 当前桌面上的全部历史版本："
+ls -lht "$OUT_DIR/"
+echo "✅ 桌面安装包 v${VERSION} 完成（旧版本已全部保留）"

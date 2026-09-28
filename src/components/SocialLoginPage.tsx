@@ -11,12 +11,14 @@ import {
 } from '../lib/socialAuth';
 import { isNativePlatform, signInWithGoogleNative, NativeGoogleSignInCanceledError } from '../lib/nativeGoogleAuth';
 import { api, SocialBinding, SocialBindingProvider } from '../lib/api';
+import { useAuth } from '../lib/auth';
 
 // 第三方登录页 = 绑定管理页：展示每个渠道的绑定状态与账号名，
 // 支持绑定 / 解绑。解绑后立即不能用该方式登录；绑定时如果该第三方
 // 账号已被其他 DingYue 账号占用，后端会返回冲突提示。
 export default function SocialLoginPage({ onBack }: { onBack: () => void }) {
   const { t } = useI18n();
+  const { token } = useAuth();
   const [bindings, setBindings] = useState<SocialBinding[] | null>(null);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -24,6 +26,8 @@ export default function SocialLoginPage({ onBack }: { onBack: () => void }) {
 
   const czlAvailable = isCzlWechatLoginAvailable();
   const native = isNativePlatform();
+  // 桌面 Electron：GIS 图标按钮在 app:// origin 下无法加载，走桥接子窗口
+  const isDesktop = !native && /Electron/i.test(navigator.userAgent);
 
   const load = async () => {
     try {
@@ -66,6 +70,29 @@ export default function SocialLoginPage({ onBack }: { onBack: () => void }) {
     setBusy('google');
     try {
       await api.bindSocialGoogle(credential);
+      setNotice(t('social.bindSuccess'));
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('social.bindFailed'));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // 桌面端（Electron）绑定 Google：app:// origin 下 GIS 按钮无法加载，
+  // 经桥接子窗口在真实站点 origin 下完成（V1.3.6）
+  const handleDesktopGoogleBind = async () => {
+    setError('');
+    setNotice('');
+    setBusy('google');
+    try {
+      const { openDesktopBridge } = await import('../lib/desktopBridge');
+      const result = await openDesktopBridge<{ ok: boolean; error?: string }>('google-bind', { token: token || undefined });
+      if (result === null) return; // 用户关闭了子窗口
+      if (!result.ok) {
+        setError(result.error || t('social.bindFailed'));
+        return;
+      }
       setNotice(t('social.bindSuccess'));
       await load();
     } catch (err) {
@@ -159,10 +186,10 @@ export default function SocialLoginPage({ onBack }: { onBack: () => void }) {
             binding={bindingOf('google')}
             statusText={statusText(bindingOf('google'))}
             busy={busy === 'google'}
-            onBind={() => (native ? void handleNativeGoogleBind() : undefined)}
+            onBind={() => (native ? void handleNativeGoogleBind() : isDesktop ? void handleDesktopGoogleBind() : undefined)}
             onUnbind={() => void handleUnbind('google')}
             webBindSlot={
-              native ? undefined : (
+              native || isDesktop ? undefined : (
                 <GoogleLogin
                   type="icon"
                   shape="circle"

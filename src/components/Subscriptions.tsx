@@ -6,11 +6,31 @@ import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
 import { useBackHandler } from '../lib/backButton';
 import { useAuth } from '../lib/auth';
+import { getCurrencySymbol } from '../lib/currencies';
 import AddSubscription from './AddSubscription';
+
+// V1.3.6：每日摊销成本（参考设计）——月付按 30 天、年付按 365 天
+const dailyAmortized = (sub: Subscription): number => {
+  const price = Number(sub.price) || 0;
+  return sub.billingCycle === 'annually' ? price / 365 : price / 30;
+};
 
 type StatusFilter = 'all' | 'active' | 'urgent' | 'soon' | 'expired';
 
 const CUSTOM_ACCOUNTS_KEY = 'custom_accounts';
+
+// V1.3.6：存库分类值为英文/自定义名，展示时按语言翻译默认分类
+// （与添加页、统计页共用同一套映射）
+const CATEGORY_I18N: Record<string, string> = {
+  Entertainment: 'cat.entertainment', Video: 'cat.video', AI: 'cat.ai',
+  Development: 'cat.development', Electronics: 'cat.electronics',
+  Productivity: 'cat.productivity', Software: 'cat.software',
+  Lifestyle: 'cat.lifestyle', Finance: 'cat.finance'
+};
+const translateCategoryName = (name: string, t: (k: string) => string): string => {
+  const key = CATEGORY_I18N[name];
+  return key ? t(key) : name;
+};
 
 export default function Subscriptions() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
@@ -351,21 +371,21 @@ export default function Subscriptions() {
               
               <div className="space-y-1.5 pt-1">
                 <div className="flex items-center gap-2 text-on-surface-variant">
-                  <FileText size={16} />
-                  <span className="text-xs font-medium">{sub.category} {t('subs.plan')}</span>
+                  <FileText size={15} className="text-primary/70" />
+                  <span className="text-xs font-medium">{translateCategoryName(sub.category, t)} {t('subs.plan')}</span>
                 </div>
                 <div className="flex items-center gap-2 text-on-surface-variant">
-                  <User size={16} />
-                  <span className="text-xs font-medium">{sub.account} • {sub.region}</span>
+                  <User size={15} className="text-primary/70" />
+                  <span className="text-xs font-medium truncate">{(sub.account || defaultAccount)} • {sub.region}</span>
                 </div>
-                <div className="flex items-center gap-2 p-2 rounded-lg mt-2 text-on-surface-variant">
-                  <Clock size={16} />
-                  <span className="text-xs font-medium">
+                <div className="flex items-center gap-2 mt-2">
+                  <Clock size={15} className="text-emerald-500" />
+                  <span className="text-xs font-medium text-on-surface-variant">
                     {sub.nextBillingDate}
-                    {sub.daysLeft && (
+                    {sub.daysLeft !== undefined && sub.daysLeft >= 0 && (
                       <span className={cn(
                         "ml-2 font-bold px-2 py-0.5 rounded-md",
-                        sub.daysLeft <= 7 ? "bg-red-50 text-red-600" : "bg-green-50 text-green-600"
+                        sub.daysLeft <= 7 ? "bg-red-500/10 text-red-600" : "bg-emerald-500/10 text-emerald-600"
                       )}>
                         {t('subs.endsIn')} {sub.daysLeft} {t('subs.daysLower')}
                       </span>
@@ -374,9 +394,16 @@ export default function Subscriptions() {
                 </div>
               </div>
             </div>
+            {/* V1.3.6 参考设计：底部分割线 + 价格高亮 + 每日摊销小字（免费订阅显示 -） */}
             <div className="bg-surface-container-low/50 px-4 py-3 flex justify-between items-center border-t border-outline-variant/10">
-              <span className="text-primary font-extrabold text-lg">${sub.price}</span>
-              <span className="text-[10px] font-bold text-on-surface-variant/40 bg-surface-container-high w-5 h-5 flex items-center justify-center rounded">-</span>
+              <span className="text-primary font-extrabold text-lg drop-shadow-[0_0_10px_rgba(0,84,205,0.25)]">
+                {getCurrencySymbol(sub.currency)}{(Number(sub.price) || 0).toFixed(2)}
+              </span>
+              <span className="text-[11px] font-semibold text-on-surface-variant/60">
+                {Number(sub.price) > 0
+                  ? `${getCurrencySymbol(sub.currency)}${dailyAmortized(sub).toFixed(2)}${t('subs.perDay')}`
+                  : '—'}
+              </span>
             </div>
           </div>
         ))}

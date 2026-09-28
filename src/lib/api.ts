@@ -151,6 +151,28 @@ export interface SecurityOverview {
   recommendations: string[];
 }
 
+// 通行密钥凭据项（V1.3.6 列表管理）
+export interface PasskeyItem {
+  id: number;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+// 按年/月查询的真实账单趋势（V1.3.6 统计页选择器）
+export interface StatsTrendPoint {
+  label: string;
+  value: number;
+  forecast: boolean;
+}
+
+export interface StatsTrendResponse {
+  months: StatsTrendPoint[];
+  days: StatsTrendPoint[];
+  year: number;
+  month: number;
+}
+
 export type SocialBindingProvider = 'google' | 'wechat' | 'github' | 'gitee';
 
 export interface SocialBinding {
@@ -235,6 +257,7 @@ const normalizeSubscription = (item: any): Subscription => {
     region: item.region || '',
     status: (item.status || 'normal') as Subscription['status'],
     daysLeft: calculateDaysLeft(nextBillingDate),
+    createdAt: item.createdAt ?? item.created_at ?? '',
   };
 };
 
@@ -397,6 +420,16 @@ export const api = {
 
   async getStatsOverview(): Promise<StatsOverview> {
     const response = await fetch(`${API_URL}/stats/overview`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  // V1.3.6：按年份（和可选月份）拉真实账单趋势；月份缺省时 days 返回空数组
+  async getStatsTrend(year: number, month?: number): Promise<StatsTrendResponse> {
+    const query = month ? `?year=${year}&month=${month}` : `?year=${year}`;
+    const response = await fetch(`${API_URL}/stats/trend${query}`, {
       headers: getAuthHeaders(),
     });
     if (!response.ok) throw new Error(await parseApiError(response));
@@ -649,10 +682,12 @@ export const api = {
     return Array.isArray(data?.bindings) ? data.bindings : [];
   },
 
-  async bindSocialGoogle(credential: string): Promise<void> {
+  async bindSocialGoogle(credential: string, overrideToken?: string): Promise<void> {
     const response = await fetch(`${API_URL}/auth/bind/google`, {
       method: 'POST',
-      headers: getAuthHeaders(true),
+      headers: overrideToken
+        ? { 'Content-Type': 'application/json', Authorization: `Bearer ${overrideToken}` }
+        : getAuthHeaders(true),
       body: JSON.stringify({ credential }),
     });
     if (!response.ok) throw new Error(await parseApiError(response));
@@ -750,21 +785,57 @@ export const api = {
     return response.json();
   },
 
-  async beginPasskeyRegistration(): Promise<PublicKeyCredentialCreationOptionsJSON> {
+  async beginPasskeyRegistration(overrideToken?: string): Promise<PublicKeyCredentialCreationOptionsJSON> {
     const response = await fetch(`${API_URL}/webauthn/register/options`, {
       method: 'POST',
-      headers: getAuthHeaders(true),
+      headers: overrideToken
+        ? { 'Content-Type': 'application/json', Authorization: `Bearer ${overrideToken}` }
+        : getAuthHeaders(true),
       body: JSON.stringify({}),
     });
     if (!response.ok) throw new Error(await parseApiError(response));
     return response.json();
   },
 
-  async finishPasskeyRegistration(credential: RegistrationResponseJSON): Promise<{ verified: boolean; passkeyCount: number }> {
+  async finishPasskeyRegistration(
+    credential: RegistrationResponseJSON,
+    overrideToken?: string,
+    label?: string
+  ): Promise<{ verified: boolean; passkeyCount: number }> {
     const response = await fetch(`${API_URL}/webauthn/register/verify`, {
       method: 'POST',
+      headers: overrideToken
+        ? { 'Content-Type': 'application/json', Authorization: `Bearer ${overrideToken}` }
+        : getAuthHeaders(true),
+      body: JSON.stringify({ credential, label }),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  // 通行密钥列表（V1.3.6：设置页展示具体凭据，支持重命名 / 删除）
+  async listPasskeys(): Promise<PasskeyItem[]> {
+    const response = await fetch(`${API_URL}/webauthn/credentials`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  async renamePasskey(id: number, label: string): Promise<PasskeyItem[]> {
+    const response = await fetch(`${API_URL}/webauthn/credentials/${id}`, {
+      method: 'PATCH',
       headers: getAuthHeaders(true),
-      body: JSON.stringify({ credential }),
+      body: JSON.stringify({ label }),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    return response.json();
+  },
+
+  async deletePasskey(id: number): Promise<PasskeyItem[]> {
+    const response = await fetch(`${API_URL}/webauthn/credentials/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(true),
     });
     if (!response.ok) throw new Error(await parseApiError(response));
     return response.json();

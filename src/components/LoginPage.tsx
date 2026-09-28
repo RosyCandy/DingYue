@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Fingerprint, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { buildApiUrl } from '../lib/api';
-import { useGoogleLogin } from '@react-oauth/google';
+import { buildApiUrl, api } from '../lib/api';
+import { useGoogleLogin, GoogleLogin } from '@react-oauth/google';
 import { isNativePlatform, signInWithGoogleNative, NativeGoogleSignInCanceledError } from '../lib/nativeGoogleAuth';
-import { beginGoogleCodeLogin } from '../lib/socialAuth';
+import { beginDesktopGoogleLogin } from '../lib/socialAuth';
+import { getBridgeParams, bridgeHandshake, bridgeReturnResult } from '../lib/desktopBridge';
 import {
     isAppleLoginAvailable,
     isWechatLoginAvailable,
@@ -19,13 +20,13 @@ import {
     beginGiteeLogin,
     SOCIAL_LOGIN_ERROR_KEY
 } from '../lib/socialAuth';
-import { loginWithPasskey, isPasskeyUserCancellation } from '../lib/passkey';
+import { loginWithPasskey, registerPasskeyWithToken, isPasskeyUserCancellation } from '../lib/passkey';
 import { version as appVersion } from '../../package.json';
 
 type Mode = 'login' | 'register' | 'forgot';
 
 export default function LoginPage() {
-    const { login } = useAuth();
+    const { login: authLogin } = useAuth();
     const [mode, setMode] = useState<Mode>('login');
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
@@ -59,6 +60,76 @@ export default function LoginPage() {
     const wechatEntryAvailable = wechatAvailable || czlAvailable;
     const githubAvailable = true;  // GitHub 按钮始终显示
     const giteeAvailable = true;  // Gitee 按钮始终显示
+
+    // ── 桌面桥接子窗口模式 ─────────────────────────────────────────────
+    // 本页面可能被桌面主窗口以子窗口形式打开（?bridge=google&nonce=...），
+    // 在真实站点 origin 下替桌面端完成 Google 登录 / 通行密钥注册。
+    // 任何方式登录成功都通过 wrappedLogin 回传令牌；子窗口随后自动关闭。
+    const bridge = getBridgeParams();
+
+    const login = (token: string, user: any) => {
+        if (bridge) {
+            bridgeReturnResult(bridge.nonce, { token, user });
+            return;
+        }
+        authLogin(token, user);
+    };
+
+    // passkey 桥接：桌面端 app:// origin 无法通过 WebAuthn 的 rpID 校验，
+    // 在这里用主窗口传来的会话 token 完成注册后把结果传回去。
+    const [passkeyBridgeState, setPasskeyBridgeState] = useState<'waiting' | 'working' | 'done'>('waiting');
+
+    // google-bind 桥接：接收主窗口传来的会话 token，用于调用绑定接口
+    const [googleBindToken, setGoogleBindToken] = useState('');
+
+    useEffect(() => {
+        if (!bridge || bridge.mode !== 'google-bind') return;
+        const cleanup = bridgeHandshake(bridge.nonce, ({ token }) => {
+            setGoogleBindToken(token || '');
+        });
+        return cleanup;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    useEffect(() => {
+        if (!bridge || bridge.mode !== 'passkey') return;
+        const cleanup = bridgeHandshake(bridge.nonce, async ({ token }) => {
+            if (!token) {
+                bridgeReturnResult(bridge.nonce, { ok: false, error: 'missing token' });
+                return;
+            }
+            setPasskeyBridgeState('working');
+            try {
+                const result = await registerPasskeyWithToken(token);
+                setPasskeyBridgeState('done');
+                bridgeReturnResult(bridge.nonce, { ok: true, passkeyCount: result.passkeyCount });
+            } catch (err) {
+                const silent = isPasskeyUserCancellation(err);
+                setPasskeyBridgeState('done');
+                bridgeReturnResult(bridge.nonce, {
+                    ok: false,
+                    cancelled: silent,
+                    error: err instanceof Error ? err.message : String(err)
+                });
+            }
+        });
+        return cleanup;
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // google 桥接：握手完成后自动弹出 Google 选号窗，取消/失败则退回本页手动选择
+    const googleAutoStarted = useRef(false);
+    useEffect(() => {
+        if (!bridge || bridge.mode !== 'google' || googleAutoStarted.current) return;
+        googleAutoStarted.current = true;
+        const cleanup = bridgeHandshake(bridge.nonce, () => {
+            setGoogleLoading(true);
+            googleWebLogin();
+        });
+        // google 模式下主窗口不传 token；弹窗取消时恢复按钮可用
+        return () => { cleanup(); setGoogleLoading(false); };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     useEffect(() => {
         const socialError = sessionStorage.getItem(SOCIAL_LOGIN_ERROR_KEY);
@@ -171,6 +242,21 @@ export default function LoginPage() {
         }
     };
 
+    const handleDesktopGoogleLogin = async () => {
+        setGoogleLoading(true);
+        resetMessages();
+        try {
+            // 桥接子窗口里完成 Google OAuth，令牌经 postMessage 传回
+            const result = await beginDesktopGoogleLogin();
+            if (result) login(result.token, result.user);
+            // result 为 null 表示用户直接关闭了子窗口，静默取消
+        } catch (err) {
+            setError(err instanceof Error ? err.message : 'Google 登录失败');
+        } finally {
+            setGoogleLoading(false);
+        }
+    };
+
     const handleNativeGoogleLogin = async () => {
         setGoogleLoading(true);
         resetMessages();
@@ -221,6 +307,60 @@ export default function LoginPage() {
 
     const title = mode === 'login' ? '欢迎回来' : mode === 'register' ? '创建你的账户' : '找回密码';
     const submitLabel = mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码';
+
+    // 通行密钥桥接子窗口：桌面端添加通行密钥时，这里只显示过渡提示，
+    // 真正的系统安全密钥弹窗由本页在真实站点 origin 下触发。
+    if (bridge && bridge.mode === 'passkey') {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-surface px-6">
+                <div className="text-center space-y-4 max-w-sm">
+                    <div className="w-16 h-16 mx-auto rounded-full bg-primary/10 flex items-center justify-center">
+                        <Fingerprint className="text-primary" size={32} />
+                    </div>
+                    <h1 className="text-xl font-bold">正在添加通行密钥</h1>
+                    <p className="text-sm text-on-surface-variant">
+                        {passkeyBridgeState === 'done'
+                            ? '操作已完成，本窗口即将自动关闭。'
+                            : '请按照系统弹窗提示完成验证；取消后本窗口会自动关闭。'}
+                    </p>
+                </div>
+            </div>
+        );
+    }
+
+    // Google 绑定桥接子窗口：桌面端在设置页绑定 Google 时，这里展示 GIS 按钮，
+    // 选号成功后用主窗口传来的会话 token 调绑定接口，结果回传后自动关闭。
+    if (bridge && bridge.mode === 'google-bind') {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-surface px-6">
+                <div className="text-center space-y-5 max-w-sm">
+                    <div className="w-16 h-16 mx-auto rounded-full bg-primary/10 flex items-center justify-center">
+                        <GoogleIcon />
+                    </div>
+                    <h1 className="text-xl font-bold">绑定 Google 账号</h1>
+                    <p className="text-sm text-on-surface-variant">选择要绑定的 Google 账号，完成后本窗口会自动关闭。</p>
+                    <div className="flex justify-center">
+                        <GoogleLogin
+                            onSuccess={async ({ credential }) => {
+                                if (!credential) return;
+                                try {
+                                    await api.bindSocialGoogle(credential, googleBindToken);
+                                    bridgeReturnResult(bridge.nonce, { ok: true });
+                                } catch (err) {
+                                    bridgeReturnResult(bridge.nonce, {
+                                        ok: false,
+                                        error: err instanceof Error ? err.message : 'bind failed'
+                                    });
+                                }
+                            }}
+                            onError={() => setError('Google 登录失败')}
+                        />
+                    </div>
+                    {error && <p className="text-xs text-red-500">{error}</p>}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-surface px-6 py-10">
@@ -318,7 +458,7 @@ export default function LoginPage() {
                                 label="通过 Google 登录"
                                 onClick={() => {
                                     if (native) void handleNativeGoogleLogin();
-                                    else if (isDesktop) beginGoogleCodeLogin();
+                                    else if (isDesktop) void handleDesktopGoogleLogin();
                                     else googleWebLogin();
                                 }}
                                 disabled={googleLoading}

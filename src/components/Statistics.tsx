@@ -1,9 +1,10 @@
 import React from 'react';
 import { BarChart, Bar, XAxis, ResponsiveContainer, Cell, PieChart, Pie, CartesianGrid } from 'recharts';
-import { TrendingUp, Lightbulb, Loader2 } from 'lucide-react';
+import { TrendingUp, Lightbulb, Loader2, ChevronLeft, ChevronRight, ChevronDown, CalendarDays } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 import { useI18n } from '../lib/i18n';
-import { api, StatsOverview } from '../lib/api';
+import { api, StatsOverview, StatsTrendResponse } from '../lib/api';
 import { getCurrencySymbol, FALLBACK_RATES } from '../lib/currencies';
 import { useAuth } from '../lib/auth';
 
@@ -35,6 +36,45 @@ export default function Statistics() {
     return usd * rate;
   };
 
+  // ── V1.3.6 真实账单趋势：年 / 月 / 日自由选择 ─────────────────────────
+  // 旧版只有"未来 12 个月预测"，月视图还截断成 6 个月（1-12 月只显示 4-9 月
+  // 的由来）。现在由 /api/stats/trend 返回所选年份 12 个月、或所选月份每日的
+  // 真实账单合计，支持左右滑动在相邻月 / 年之间平滑切换。
+  const now = new Date();
+  const [trendYear, setTrendYear] = React.useState(now.getFullYear());
+  const [trendMonth, setTrendMonth] = React.useState(now.getMonth() + 1);
+  const [trend, setTrend] = React.useState<StatsTrendResponse | null>(null);
+  const [trendLoading, setTrendLoading] = React.useState(false);
+  const [trendDirection, setTrendDirection] = React.useState(1); // 滑动方向，控制过渡动画
+  const [yearPickerOpen, setYearPickerOpen] = React.useState(false);
+
+  const loadTrend = React.useCallback(async (year: number, month: number | null) => {
+    try {
+      setTrendLoading(true);
+      setTrend(await api.getStatsTrend(year, month ?? undefined));
+    } catch {
+      // 趋势加载失败不阻塞整页
+    } finally {
+      setTrendLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void loadTrend(trendYear, timeRange === 'monthly' ? trendMonth : null);
+  }, [trendYear, trendMonth, timeRange, loadTrend]);
+
+  // 切换到相邻月（保持年份进位）
+  const gotoAdjacentMonth = (delta: number) => {
+    setTrendDirection(delta);
+    const next = new Date(trendYear, trendMonth - 1 + delta, 1);
+    setTrendYear(next.getFullYear());
+    setTrendMonth(next.getMonth() + 1);
+  };
+  const gotoAdjacentYear = (delta: number) => {
+    setTrendDirection(delta);
+    setTrendYear((y) => y + delta);
+  };
+
   const loadStats = async () => {
     try {
       setLoading(true);
@@ -52,14 +92,33 @@ export default function Statistics() {
     void loadStats();
   }, []);
 
-  const trendData = React.useMemo(() => {
-    if (!stats) return [];
-    if (timeRange === 'annual') return stats.trendData;
-    const currentIndex = stats.trendData.findIndex((item) => item.active);
-    if (currentIndex < 0) return stats.trendData.slice(-6);
-    const start = Math.max(0, currentIndex - 5);
-    return stats.trendData.slice(start, currentIndex + 1);
-  }, [stats, timeRange]);
+  // 图表数据：月视图 = 所选月每日账单；年视图 = 所选年 12 个月账单
+  const chartData = React.useMemo(() => {
+    if (!trend) return [];
+    return timeRange === 'monthly' ? trend.days : trend.months;
+  }, [trend, timeRange]);
+
+  const rangeTotal = React.useMemo(
+    () => chartData.reduce((acc, item) => acc + item.value, 0),
+    [chartData]
+  );
+
+  // 触屏 / 鼠标左右滑动切换上/下一个（月或年）
+  const swipeState = React.useRef<{ x: number; y: number } | null>(null);
+  const onSwipeStart = (e: React.PointerEvent) => {
+    swipeState.current = { x: e.clientX, y: e.clientY };
+  };
+  const onSwipeEnd = (e: React.PointerEvent) => {
+    const start = swipeState.current;
+    swipeState.current = null;
+    if (!start) return;
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    if (Math.abs(dx) < 48 || Math.abs(dy) > Math.abs(dx)) return; // 距离不够或竖向滚动，忽略
+    const delta = dx < 0 ? 1 : -1; // 左滑 = 下一个
+    if (timeRange === 'monthly') gotoAdjacentMonth(delta);
+    else gotoAdjacentYear(delta);
+  };
 
   const hasStatsData = Boolean(
     stats && (stats.trendData.length > 0 || stats.categoryBreakdown.length > 0 || stats.accountComparison.length > 0)
@@ -104,66 +163,171 @@ export default function Statistics() {
           <p className="text-on-surface-variant font-medium tracking-wide text-sm uppercase">{t('stats.financialInsights')}</p>
           <h1 className="text-4xl font-extrabold tracking-tight mt-1">{t('stats.title')}</h1>
         </div>
-        <div className="flex gap-2">
-          <button 
-            onClick={() => setTimeRange('monthly')}
-            className={cn(
-              "px-4 py-2 font-semibold rounded-xl text-sm transition-all",
-              timeRange === 'monthly' ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-surface-container-high text-on-surface hover:opacity-80"
-            )}
-          >
-            {t('stats.monthly')}
-          </button>
-          <button 
-            onClick={() => setTimeRange('annual')}
-            className={cn(
-              "px-4 py-2 font-semibold rounded-xl text-sm transition-all",
-              timeRange === 'annual' ? "bg-primary text-white shadow-lg shadow-primary/20" : "bg-surface-container-high text-on-surface hover:opacity-80"
-            )}
-          >
-            {t('stats.annual')}
-          </button>
-        </div>
       </section>
 
       {/* Main Analytics Bento Grid */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
-        {/* Expenditure Trend */}
-        <div className="md:col-span-8 bg-surface-container-lowest rounded-xl p-6 shadow-sm flex flex-col gap-6">
+        {/* Expenditure Trend — V1.3.6：年/月/日自由选择 + 平滑滑动 */}
+        <div className="md:col-span-8 bg-surface-container-lowest rounded-xl p-6 shadow-sm flex flex-col gap-4">
           <div className="flex justify-between items-start">
             <div>
               <h3 className="text-lg font-bold text-on-surface">{t('stats.expenditureTrend')}</h3>
-              <p className="text-sm text-on-surface-variant">{t('stats.yearlyProjection')}</p>
+              <p className="text-sm text-on-surface-variant">{t('stats.trendSwipeHint')}</p>
             </div>
             <div className="text-right">
-              <span className="text-2xl font-bold text-primary">{currencySymbol}{convertFromUsd(stats.totalYearlyForecast).toFixed(2)}</span>
-              <p className="text-xs text-on-surface-variant">{t('stats.totalYearlyForecast')}</p>
+              <span className="text-2xl font-bold text-primary">
+                {trendLoading ? '…' : `${currencySymbol}${convertFromUsd(rangeTotal).toFixed(2)}`}
+              </span>
+              <p className="text-xs text-on-surface-variant">
+                {timeRange === 'monthly'
+                  ? `${trendYear}${t('stats.yearUnit')} ${trendMonth}${t('stats.monthUnit')} · ${t('stats.rangeTotal')}`
+                  : `${trendYear}${t('stats.yearUnit')} · ${t('stats.rangeTotal')}`}
+              </p>
             </div>
           </div>
-          
-          <div className="h-64 w-full mt-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={trendData}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e3e6ef" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fontSize: 10, fill: '#414755' }}
-                  dy={10}
-                />
-                <Bar dataKey="value" radius={[4, 4, 0, 0]}>
-                  {trendData.map((entry, index) => (
-                    <Cell 
-                      key={`cell-${index}`} 
-                      fill={entry.active ? '#0054cd' : entry.forecast ? '#e8e8ed' : '#ededf2'} 
-                      stroke={entry.forecast ? '#c1c6d7' : 'none'}
-                      strokeDasharray={entry.forecast ? "4 4" : "0"}
-                    />
+
+          {/* 年份导航 + 月/年模式切换 */}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-1 relative">
+              <button
+                onClick={() => gotoAdjacentYear(-1)}
+                className="w-8 h-8 rounded-full bg-surface-container-low hover:bg-surface-container-high flex items-center justify-center active:scale-90 transition-all"
+                aria-label="previous year"
+              >
+                <ChevronLeft size={16} />
+              </button>
+              <button
+                onClick={() => setYearPickerOpen((v) => !v)}
+                className="h-8 px-3 rounded-full bg-surface-container-low hover:bg-surface-container-high flex items-center gap-1.5 text-sm font-bold text-on-surface active:scale-95 transition-all"
+              >
+                <CalendarDays size={14} className="text-primary" />
+                {trendYear}{t('stats.yearUnit')}
+                <ChevronDown size={12} className={cn('transition-transform', yearPickerOpen && 'rotate-180')} />
+              </button>
+              <button
+                onClick={() => gotoAdjacentYear(1)}
+                className="w-8 h-8 rounded-full bg-surface-container-low hover:bg-surface-container-high flex items-center justify-center active:scale-90 transition-all"
+                aria-label="next year"
+              >
+                <ChevronRight size={16} />
+              </button>
+              {yearPickerOpen && (
+                <div className="absolute top-9 left-0 z-20 w-28 max-h-56 overflow-y-auto bg-surface-container-lowest rounded-xl shadow-xl border border-outline-variant/10 py-1">
+                  {Array.from({ length: 12 }, (_, i) => now.getFullYear() + 1 - i).map((y) => (
+                    <button
+                      key={y}
+                      onClick={() => { setTrendYear(y); setYearPickerOpen(false); }}
+                      className={cn(
+                        'w-full text-left px-3 py-2 text-sm font-semibold hover:bg-surface-container-low transition-colors',
+                        y === trendYear ? 'text-primary' : 'text-on-surface'
+                      )}
+                    >
+                      {y}
+                    </button>
                   ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-1 bg-surface-container-low rounded-full p-1">
+              <button
+                onClick={() => setTimeRange('annual')}
+                className={cn(
+                  'px-4 py-1.5 rounded-full text-xs font-bold transition-all',
+                  timeRange === 'annual' ? 'bg-primary text-white shadow-md shadow-primary/30' : 'text-on-surface-variant'
+                )}
+              >
+                {t('stats.byYear')}
+              </button>
+              <button
+                onClick={() => setTimeRange('monthly')}
+                className={cn(
+                  'px-4 py-1.5 rounded-full text-xs font-bold transition-all',
+                  timeRange === 'monthly' ? 'bg-primary text-white shadow-md shadow-primary/30' : 'text-on-surface-variant'
+                )}
+              >
+                {t('stats.byMonth')}
+              </button>
+            </div>
+          </div>
+
+          {/* 月份横滑选择条（月视图） */}
+          {timeRange === 'monthly' && (
+            <div className="flex gap-2 overflow-x-auto no-scrollbar py-0.5 -mx-1 px-1">
+              {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => {
+                const isCurrent = m === trendMonth;
+                const isNowMonth = trendYear === now.getFullYear() && m === now.getMonth() + 1;
+                return (
+                  <button
+                    key={m}
+                    onClick={() => { setTrendDirection(m > trendMonth ? 1 : -1); setTrendMonth(m); }}
+                    className={cn(
+                      'shrink-0 w-10 h-8 rounded-full text-xs font-bold transition-all active:scale-90',
+                      isCurrent
+                        ? 'bg-primary text-white shadow-md shadow-primary/30'
+                        : isNowMonth
+                          ? 'bg-primary/10 text-primary border border-primary/30'
+                          : 'bg-surface-container-low text-on-surface-variant hover:bg-surface-container-high'
+                    )}
+                  >
+                    {m}{t('stats.monthUnit')}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {/* 图表：左右滑动切换上/下一个月或年 */}
+          <div
+            className="h-64 w-full touch-pan-y select-none relative"
+            onPointerDown={onSwipeStart}
+            onPointerUp={onSwipeEnd}
+            onPointerCancel={() => { swipeState.current = null; }}
+          >
+            {trendLoading && (
+              <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface/40 backdrop-blur-[1px] rounded-lg">
+                <Loader2 size={20} className="animate-spin text-primary" />
+              </div>
+            )}
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={`${timeRange}-${trendYear}-${trendMonth}`}
+                initial={{ x: trendDirection * 40, opacity: 0.4 }}
+                animate={{ x: 0, opacity: 1 }}
+                exit={{ x: trendDirection * -40, opacity: 0 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="h-full"
+              >
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e3e6ef" />
+                    <XAxis
+                      dataKey="label"
+                      axisLine={false}
+                      tickLine={false}
+                      tick={{ fontSize: 10, fill: '#414755' }}
+                      dy={10}
+                      interval={timeRange === 'monthly' && chartData.length > 20 ? 2 : 0}
+                    />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                      {chartData.map((entry, index) => {
+                        const isNow =
+                          timeRange === 'monthly'
+                            ? trendYear === now.getFullYear() && trendMonth === now.getMonth() + 1 && entry.label === String(now.getDate())
+                            : trendYear === now.getFullYear() && entry.label === String(now.getMonth() + 1);
+                        return (
+                          <Cell
+                            key={`cell-${index}`}
+                            fill={isNow ? '#0054cd' : entry.forecast ? '#e8e8ed' : entry.value > 0 ? '#7ba7e8' : '#ededf2'}
+                            stroke={entry.forecast ? '#c1c6d7' : 'none'}
+                            strokeDasharray={entry.forecast ? '4 4' : '0'}
+                          />
+                        );
+                      })}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </motion.div>
+            </AnimatePresence>
           </div>
         </div>
 
