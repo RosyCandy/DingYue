@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, PlusCircle, CloudUpload, ChevronRight, Share2, Calendar, Clock, ArrowLeft } from 'lucide-react';
+import { X, PlusCircle, CloudUpload, ChevronRight, Calendar, Clock, ArrowLeft } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import IconSelection from './IconSelection';
 import { useI18n } from '../lib/i18n';
@@ -129,211 +129,183 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
               exit={{ x: 20, opacity: 0 }}
               className="space-y-8"
             >
-              {/* Subscription Details Header */}
-              <section className="flex flex-col items-center text-center space-y-4 mb-10">
-                <button 
-                  onClick={() => setStep(2)}
-                  className="w-20 h-20 bg-primary-container/10 rounded-2xl flex items-center justify-center text-primary overflow-hidden border-2 border-dashed border-primary/20 hover:border-primary/40 transition-colors"
-                >
-                  {selectedIcon ? (
-                    <img src={selectedIcon} alt="Selected" className="w-12 h-12 object-contain" referrerPolicy="no-referrer" />
-                  ) : (
-                    <PlusCircle size={40} />
-                  )}
-                </button>
-                <div className="space-y-1">
-                  <h2 className="text-3xl font-extrabold tracking-tight text-on-surface">
-                    {initialData ? initialData.name : t('add.newCommitment')}
-                  </h2>
-                  <p className="text-on-surface-variant text-sm">{t('add.organize')}</p>
+              {/* V1.3.7：单卡片表单（此前四个卡片割裂感强），图标+名称同行等高，
+                  分类/地区、来源/邮箱、金额/货币、频率/账单日两两同行（手机端同样生效） */}
+              <section className="bg-surface-container-low p-5 rounded-2xl space-y-5">
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => setStep(2)}
+                    aria-label={t('add.selectIcon')}
+                    className="w-14 h-14 shrink-0 bg-primary-container/10 rounded-xl flex items-center justify-center text-primary overflow-hidden border-2 border-dashed border-primary/20 hover:border-primary/40 transition-colors"
+                  >
+                    {selectedIcon ? (
+                      <img src={selectedIcon} alt="Selected" className="w-9 h-9 object-contain" referrerPolicy="no-referrer" />
+                    ) : (
+                      <PlusCircle size={26} />
+                    )}
+                  </button>
+                  <input
+                    className="flex-1 min-w-0 h-14 bg-surface-container-lowest border-none rounded-lg px-4 focus:ring-2 focus:ring-primary/20 placeholder:text-outline-variant transition-all shadow-sm"
+                    placeholder={t('add.subNamePlaceholder')}
+                    type="text"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
                 </div>
-              </section>
 
-              {/* Subscription Identity */}
-              <section className="space-y-4">
-                <div className="bg-surface-container-low p-6 rounded-xl space-y-6">
+                <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.subName')}</label>
+                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.category')}</label>
+                    <div className="relative">
+                      <select
+                        className="w-full bg-surface-container-lowest border-none rounded-lg p-4 pr-10 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm truncate"
+                        value={category}
+                        onChange={(e) => setCategory(e.target.value)}
+                      >
+                        {/* 存库值保持英文/自定义名，显示按语言翻译 */}
+                        <option value="Entertainment">{t('cat.entertainment')}</option>
+                        <option value="Video">{t('cat.video')}</option>
+                        <option value="AI">{t('cat.ai')}</option>
+                        <option value="Development">{t('cat.development')}</option>
+                        <option value="Electronics">{t('cat.electronics')}</option>
+                        <option value="Productivity">{t('cat.productivity')}</option>
+                        <option value="Software">{t('cat.software')}</option>
+                        <option value="Lifestyle">{t('cat.lifestyle')}</option>
+                        <option value="Finance">{t('cat.finance')}</option>
+                        {customCategories.length > 0 && (
+                          <optgroup label={t('subs.customCategories')}>
+                            {customCategories.map((c) => (
+                              <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                      <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={18} />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.region')}</label>
                     <input
                       className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 placeholder:text-outline-variant transition-all shadow-sm"
-                      placeholder={t('add.subNamePlaceholder')}
+                      placeholder={t('add.regionPlaceholder')}
                       type="text"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
+                      value={region}
+                      onChange={(e) => setRegion(e.target.value)}
                     />
                   </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.category')}</label>
-                      <div className="relative">
-                        <select
-                          className="w-full bg-surface-container-lowest border-none rounded-lg p-4 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm"
-                          value={category}
-                          onChange={(e) => setCategory(e.target.value)}
-                        >
-                          {/* 存库值保持英文/自定义名，显示按语言翻译 */}
-                          <option value="Entertainment">{t('cat.entertainment')}</option>
-                          <option value="Video">{t('cat.video')}</option>
-                          <option value="AI">{t('cat.ai')}</option>
-                          <option value="Development">{t('cat.development')}</option>
-                          <option value="Electronics">{t('cat.electronics')}</option>
-                          <option value="Productivity">{t('cat.productivity')}</option>
-                          <option value="Software">{t('cat.software')}</option>
-                          <option value="Lifestyle">{t('cat.lifestyle')}</option>
-                          <option value="Finance">{t('cat.finance')}</option>
-                          {customCategories.length > 0 && (
-                            <optgroup label={t('subs.customCategories')}>
-                              {customCategories.map((c) => (
-                                <option key={c.id} value={c.name}>{c.name}</option>
-                              ))}
-                            </optgroup>
-                          )}
-                        </select>
-                        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={20} />
-                      </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.source')}</label>
+                    <div className="relative">
+                      <select
+                        className="w-full bg-surface-container-lowest border-none rounded-lg p-4 pr-10 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm truncate"
+                        value={source}
+                        onChange={(e) => setSource(e.target.value)}
+                      >
+                        <option value="Apple App Store">{t('add.sourceApple')}</option>
+                        <option value="Google Play Store">{t('add.sourceGoogle')}</option>
+                        <option value="Direct Billing">{t('add.sourceDirect')}</option>
+                      </select>
+                      <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={18} />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.region')}</label>
-                      <input
-                        className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 placeholder:text-outline-variant transition-all shadow-sm"
-                        placeholder={t('add.regionPlaceholder')}
-                        type="text"
-                        value={region}
-                        onChange={(e) => setRegion(e.target.value)}
-                      />
-                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.accountEmail')}</label>
+                    <input
+                      className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 placeholder:text-outline-variant transition-all shadow-sm"
+                      placeholder="example@icloud.com"
+                      type="email"
+                      value={account}
+                      onChange={(e) => setAccount(e.target.value)}
+                    />
                   </div>
                 </div>
-              </section>
 
-              {/* Subscription Source */}
-              <section className="space-y-4">
-                <div className="bg-surface-container-low p-6 rounded-xl space-y-6">
-                  <div className="flex items-center gap-3 mb-2">
-                    <Share2 className="text-primary-container" size={20} />
-                    <h3 className="text-sm font-bold text-on-surface">{t('add.sourceAccount')}</h3>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.source')}</label>
-                      <div className="relative">
-                        <select
-                          className="w-full bg-surface-container-lowest border-none rounded-lg p-4 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm"
-                          value={source}
-                          onChange={(e) => setSource(e.target.value)}
-                        >
-                          <option value="Apple App Store">{t('add.sourceApple')}</option>
-                          <option value="Google Play Store">{t('add.sourceGoogle')}</option>
-                          <option value="Direct Billing">{t('add.sourceDirect')}</option>
-                        </select>
-                        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={20} />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.accountEmail')}</label>
-                      <input 
-                        className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 placeholder:text-outline-variant transition-all shadow-sm" 
-                        placeholder="example@icloud.com" 
-                        type="email"
-                        value={account}
-                        onChange={(e) => setAccount(e.target.value)}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </section>
-
-              {/* Financials */}
-              <section className="space-y-4">
-                <div className="bg-surface-container-low p-6 rounded-xl space-y-5">
-                  {/* 免费订阅开关：金额置 0，续期日期与到期提醒仍然生效 */}
-                  <label className="flex items-center justify-between cursor-pointer">
-                    <span className="text-sm font-semibold text-on-surface">{t('add.freeSubscription')}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = !isFree;
-                        setIsFree(next);
-                        if (next) setPrice('0');
-                      }}
+                {/* 免费订阅开关：金额置 0，续期日期与到期提醒仍然生效 */}
+                <label className="flex items-center justify-between cursor-pointer pt-1">
+                  <span className="text-sm font-semibold text-on-surface">{t('add.freeSubscription')}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = !isFree;
+                      setIsFree(next);
+                      if (next) setPrice('0');
+                    }}
+                    className={cn(
+                      'relative w-11 h-6 rounded-full transition-colors',
+                      isFree ? 'bg-primary' : 'bg-outline-variant/40'
+                    )}
+                    aria-pressed={isFree}
+                  >
+                    <span
                       className={cn(
-                        'relative w-11 h-6 rounded-full transition-colors',
-                        isFree ? 'bg-primary' : 'bg-outline-variant/40'
+                        'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all',
+                        isFree ? 'left-[22px]' : 'left-0.5'
                       )}
-                      aria-pressed={isFree}
-                    >
-                      <span
-                        className={cn(
-                          'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all',
-                          isFree ? 'left-[22px]' : 'left-0.5'
-                        )}
-                      ></span>
-                    </button>
-                  </label>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="md:col-span-2 space-y-2">
-                      <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.amount')}</label>
-                      <div className="relative">
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary font-bold">{getCurrencySymbol(currency)}</span>
-                        <input 
-                          className="w-full bg-surface-container-lowest border-none rounded-lg py-4 pl-10 pr-4 focus:ring-2 focus:ring-primary/20 shadow-sm text-xl font-bold disabled:opacity-50" 
-                          placeholder="0.00" 
-                          step="0.01" 
-                          type="number"
-                          disabled={isFree}
-                          value={price}
-                          onChange={(e) => setPrice(e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.currency')}</label>
-                      <div className="relative">
-                        <select 
-                          className="w-full bg-surface-container-lowest border-none rounded-lg p-4 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm font-semibold"
-                          value={currency}
-                          disabled={isFree}
-                          onChange={(e) => setCurrency(e.target.value)}
-                        >
-                          {ACTIVE_CURRENCIES.map((c) => (
-                            <option key={c.code} value={c.code}>{c.code} {c.symbol}</option>
-                          ))}
-                        </select>
-                        <ChevronRight className="absolute right-4 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={20} />
-                      </div>
-                    </div>
-                  </div>
-                  <p className="text-xs text-on-surface-variant px-1">{t('add.freeHint')}</p>
-                </div>
-              </section>
+                    ></span>
+                  </button>
+                </label>
 
-              {/* Billing Cycle */}
-              <section className="space-y-4">
-                <div className="bg-surface-container-low p-6 rounded-xl space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.billingFreq')}</label>
-                      <div className="relative">
-                        <select 
-                          className="w-full bg-surface-container-lowest border-none rounded-lg p-4 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm"
-                          value={cycle}
-                          onChange={(e) => setCycle(e.target.value as 'monthly' | 'annually')}
-                        >
-                          <option value="monthly">{t('add.monthly')}</option>
-                          <option value="annually">{t('add.annually')}</option>
-                        </select>
-                        <Clock className="absolute right-4 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none" size={20} />
-                      </div>
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.nextBilling')}</label>
-                      <input 
-                        className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 shadow-sm" 
-                        type="date"
-                        value={nextBillingDate}
-                        onChange={(e) => setNextBillingDate(e.target.value)}
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="col-span-2 space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.amount')}</label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary font-bold">{getCurrencySymbol(currency)}</span>
+                      <input
+                        className="w-full bg-surface-container-lowest border-none rounded-lg py-4 pl-10 pr-4 focus:ring-2 focus:ring-primary/20 shadow-sm text-xl font-bold disabled:opacity-50"
+                        placeholder="0.00"
+                        step="0.01"
+                        type="number"
+                        disabled={isFree}
+                        value={price}
+                        onChange={(e) => setPrice(e.target.value)}
                       />
                     </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.currency')}</label>
+                    <div className="relative">
+                      <select
+                        className="w-full bg-surface-container-lowest border-none rounded-lg py-4 pl-3 pr-7 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm text-sm font-semibold truncate disabled:opacity-50"
+                        value={currency}
+                        disabled={isFree}
+                        onChange={(e) => setCurrency(e.target.value)}
+                      >
+                        {ACTIVE_CURRENCIES.map((c) => (
+                          <option key={c.code} value={c.code}>{c.code} {c.symbol}</option>
+                        ))}
+                      </select>
+                      <ChevronRight className="absolute right-2 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={16} />
+                    </div>
+                  </div>
+                </div>
+                <p className="text-xs text-on-surface-variant px-1">{t('add.freeHint')}</p>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.billingFreq')}</label>
+                    <div className="relative">
+                      <select
+                        className="w-full bg-surface-container-lowest border-none rounded-lg p-4 pr-10 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm"
+                        value={cycle}
+                        onChange={(e) => setCycle(e.target.value as 'monthly' | 'annually')}
+                      >
+                        <option value="monthly">{t('add.monthly')}</option>
+                        <option value="annually">{t('add.annually')}</option>
+                      </select>
+                      <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none" size={18} />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.nextBilling')}</label>
+                    <input
+                      className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 shadow-sm"
+                      type="date"
+                      value={nextBillingDate}
+                      onChange={(e) => setNextBillingDate(e.target.value)}
+                    />
                   </div>
                 </div>
               </section>

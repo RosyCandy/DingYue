@@ -372,7 +372,7 @@ export default function Subscriptions() {
               <div className="space-y-1.5 pt-1">
                 <div className="flex items-center gap-2 text-on-surface-variant">
                   <FileText size={15} className="text-primary/70" />
-                  <span className="text-xs font-medium">{translateCategoryName(sub.category, t)} {t('subs.plan')}</span>
+                  <span className="text-xs font-medium">{translateCategoryName(sub.category, t)}</span>
                 </div>
                 <div className="flex items-center gap-2 text-on-surface-variant">
                   <User size={15} className="text-primary/70" />

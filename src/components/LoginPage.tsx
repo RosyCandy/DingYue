@@ -45,12 +45,22 @@ export default function LoginPage() {
     const native = isNativePlatform();
     const isDesktop = native === false && /Electron/i.test(navigator.userAgent);
 
+    // 本页面可能被桌面主窗口以子窗口形式打开（?bridge=google&nonce=...）
+    const bridge = getBridgeParams();
+
+    // google 桥接子窗口的错误在极简视图里展示（支持就地重试），主窗口仍走登录页错误条
+    const [googleBridgeError, setGoogleBridgeError] = useState('');
+    const showGoogleError = (message: string) => {
+        if (bridge?.mode === 'google') setGoogleBridgeError(message);
+        else setError(message);
+    };
+
     // 网页端 Google 登录：点击时才动态加载 GIS 并弹 OAuth 窗口，按钮本身是离线本地图标
     const googleWebLogin = useGoogleLogin({
         flow: 'implicit',
         scope: 'openid email profile',
         onSuccess: (tokenResponse) => void sendTokenToBackend(tokenResponse.access_token),
-        onError: () => setError('Google 登录失败'),
+        onError: () => showGoogleError('Google 登录失败'),
     });
 
     const wechatAvailable = isWechatLoginAvailable();
@@ -62,10 +72,8 @@ export default function LoginPage() {
     const giteeAvailable = true;  // Gitee 按钮始终显示
 
     // ── 桌面桥接子窗口模式 ─────────────────────────────────────────────
-    // 本页面可能被桌面主窗口以子窗口形式打开（?bridge=google&nonce=...），
     // 在真实站点 origin 下替桌面端完成 Google 登录 / 通行密钥注册。
     // 任何方式登录成功都通过 wrappedLogin 回传令牌；子窗口随后自动关闭。
-    const bridge = getBridgeParams();
 
     const login = (token: string, user: any) => {
         if (bridge) {
@@ -219,12 +227,12 @@ export default function LoginPage() {
             const res = await fetch(buildApiUrl('/auth/google'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ accessToken }) });
             const data = await res.json();
             if (!res.ok) {
-                setError(data.error || 'Google 登录失败');
+                showGoogleError(data.error || 'Google 登录失败');
                 return;
             }
             login(data.token, data.user);
         } catch {
-            setError('网络异常，请稍后重试');
+            showGoogleError('网络异常，请稍后重试');
         }
     };
 
@@ -280,7 +288,13 @@ export default function LoginPage() {
             login(session.token, session.user);
         } catch (err) {
             if (!isPasskeyUserCancellation(err)) {
-                setError(err instanceof Error ? err.message : '通行密钥登录失败');
+                // Android 凭据管理器查不到匹配密钥时（Bitwarden 未被系统启用/未解锁等）
+                // 会直接抛 NotFoundError，此时给出可操作的指引而不是裸的英文报错
+                if ((err as { name?: string })?.name === 'NotFoundError') {
+                    setError('未找到可用的通行密钥：请确认已在系统设置里把 Bitwarden / Google 密码管理器设为通行密钥提供方并已解锁；若刚配置过，重装 App 后再试');
+                } else {
+                    setError(err instanceof Error ? err.message : '通行密钥登录失败');
+                }
             }
         } finally {
             setPasskeyLoading(false);
@@ -323,6 +337,40 @@ export default function LoginPage() {
                             ? '操作已完成，本窗口即将自动关闭。'
                             : '请按照系统弹窗提示完成验证；取消后本窗口会自动关闭。'}
                     </p>
+                </div>
+            </div>
+        );
+    }
+
+    // Google 登录桥接子窗口：极简过渡视图（不是完整登录页——否则桌面端会出现
+    // 「窗口里套登录页」的观感），握手完成后自动弹出 Google 选号窗，失败可就地重试。
+    if (bridge && bridge.mode === 'google') {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-surface px-6">
+                <div className="text-center space-y-5 max-w-sm">
+                    <div className="w-16 h-16 mx-auto rounded-full bg-primary/10 flex items-center justify-center">
+                        <GoogleIcon />
+                    </div>
+                    <h1 className="text-xl font-bold">Google 登录</h1>
+                    {googleBridgeError ? (
+                        <>
+                            <p className="text-sm text-red-500">{googleBridgeError}</p>
+                            <button
+                                onClick={() => {
+                                    setGoogleBridgeError('');
+                                    googleWebLogin();
+                                }}
+                                className="px-8 py-2.5 rounded-xl bg-primary text-white font-bold text-sm active:scale-95 transition-all"
+                            >
+                                重试
+                            </button>
+                        </>
+                    ) : (
+                        <p className="text-sm text-on-surface-variant flex items-center justify-center gap-2">
+                            <span className="inline-block w-4 h-4 border-2 border-primary/25 border-t-primary rounded-full animate-spin" />
+                            正在打开 Google 账号选择窗口…
+                        </p>
+                    )}
                 </div>
             </div>
         );

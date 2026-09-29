@@ -333,10 +333,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
 
       {/* Timeline View — V1.3.6：过去 3 年 → 今天，今天置顶，下滑看历史 */}
       <section className="space-y-4">
-        <div className="flex justify-between items-end">
-          <h2 className="text-xl font-bold tracking-tight px-1">{t('dashboard.timeline')}</h2>
-          <span className="text-[11px] font-semibold text-on-surface-variant/70 px-1">{t('dashboard.timelineHint')}</span>
-        </div>
+        <h2 className="text-xl font-bold tracking-tight px-1">{t('dashboard.timeline')}</h2>
 
         <div className="relative border-l-2 border-outline-variant/20 ml-2 space-y-4 py-2">
           {visibleTimeline.map((event, index) => {

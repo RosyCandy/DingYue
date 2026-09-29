@@ -31,6 +31,38 @@ const isAllowed = (url) => {
   }
 };
 
+// OAuth 子窗口（桥接登录窗 / Google 选号弹窗）统一伪装成 Chrome UA：
+// accounts.google.com 会拦截 Electron UA（「此浏览器或应用可能不安全」）。
+// 主窗口保持默认 UA，isDesktopElectron() 等检测依赖它。
+const OAUTH_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+
+// 子窗口（及其再弹出的窗口）统一套用导航策略与 Chrome UA。
+// 回调页拦截只对主窗口有意义：子窗口里 OAuth 由页面内 JS 完成，不落回调页。
+function setupChildWindow(childWindow) {
+  childWindow.webContents.setUserAgent(OAUTH_USER_AGENT);
+
+  childWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isAllowed(url)) {
+      event.preventDefault();
+      shell.openExternal(url);
+    }
+  });
+
+  childWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowed(url)) {
+      return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } };
+    }
+    shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  // Google GIS 从桥接窗口里再弹出的选号窗：递归套用同一套策略
+  childWindow.webContents.on('did-create-window', (grandChild) => {
+    setupChildWindow(grandChild);
+  });
+}
+
 // 本地界面的根目录（打包后在 asar 内，开发态在项目根）
 const UI_ROOT = fs.existsSync(path.join(__dirname, '..', 'desktop-files', 'dist'))
   ? path.join(__dirname, '..', 'desktop-files', 'dist')
@@ -78,13 +110,18 @@ function createWindow() {
     }
   });
 
-  // GIS/授权弹窗：允许名单内的新窗口在应用内打开
+  // GIS/授权弹窗：允许名单内的新窗口在应用内打开（桥接登录窗 / Google 选号窗）
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowed(url)) {
       return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } };
     }
     shell.openExternal(url);
     return { action: 'deny' };
+  });
+
+  // 应用内打开的子窗口（桥接登录窗等）也要套策略 + Chrome UA
+  mainWindow.webContents.on('did-create-window', (childWindow) => {
+    setupChildWindow(childWindow);
   });
 
   mainWindow.on('closed', () => { mainWindow = null; });
