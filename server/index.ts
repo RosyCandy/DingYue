@@ -217,7 +217,11 @@ const pool = mysql.createPool({
   database: process.env.DB_NAME || 'DingYue',
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0
+  queueLimit: 0,
+  // DATE/DATETIME 以字符串返回：mysql2 默认转 JS Date，reminder 扫描里
+  // String(next_billing_date).slice(0,10) 会拿到 "Tue Oct 14" 这种垃圾值，
+  // 导致防重键全部变成 0000-00-00、同档提醒重复发送（V1.3.9 实测踩坑）
+  dateStrings: true
 });
 
 const parsePrice = (value: unknown): number => {
