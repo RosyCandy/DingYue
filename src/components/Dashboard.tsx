@@ -353,7 +353,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
 
       {/* Timeline — V1.3.9：中轴时间线，左绿点=订阅开始，右红点=账单日提醒，两侧写订阅名 */}
       <section className="space-y-4">
-        <div className="flex items-center justify-between px-1">
+        <div className="flex items-center justify-between px-1 flex-wrap gap-y-1">
           <h2 className="text-xl font-bold tracking-tight">{t('dashboard.timeline')}</h2>
           <div className="flex items-center gap-3 text-[11px] text-on-surface-variant font-medium">
             <span className="flex items-center gap-1.5">
@@ -372,24 +372,30 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
           <div className="absolute left-1/2 top-0 bottom-0 w-px bg-outline-variant/25 -translate-x-1/2" />
           {visibleTimeline.map((event, index) => {
             const date = event.date;
-            const dayLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+            // V1.3.10：日期用纯数字（M/D，跨年带年份）——任何语言都无歧义，
+            // 不再依赖 toLocaleDateString 的月份名（WebView 语言与应用语言不一致时会露英文）
+            const dayLabel = date.getFullYear() === new Date().getFullYear()
+              ? `${date.getMonth() + 1}/${date.getDate()}`
+              : `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 
-            // 今天节点：居中
+            // 今天节点：只有气泡本身骑在中轴上（V1.3.10 用户反馈：不要蓝点和虚线）
             if (event.kind === 'today') {
               return (
-                <div key={`today-${index}`} className="relative flex items-center justify-center py-1.5">
-                  <div className="absolute left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-primary border-2 border-surface shadow-sm z-10" />
-                  <span className="bg-primary/10 text-primary text-xs font-bold px-3 py-1 rounded-full">{t('dashboard.today')}</span>
+                <div key={`today-${index}`} className="relative flex items-center justify-center py-2">
+                  <span className="relative z-10 bg-primary/10 border border-primary/25 text-primary text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
+                    {t('dashboard.today')}
+                  </span>
                 </div>
               );
             }
 
-            // 季度刻度：居中小灰点 + 年月
+            // 季度刻度：无订阅事件的占位点，灰点 + 日期放点的右边；
+            // 行距放宽到与订阅卡片行一致（V1.3.10 用户反馈：太挤、点看不清）
             if (event.kind === 'quarter') {
               return (
-                <div key={`q-${date.getTime()}-${index}`} className="relative flex items-center justify-center py-1">
-                  <div className="absolute left-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-surface-container-high border-2 border-surface z-10" />
-                  <span className="text-[11px] text-on-surface-variant/80 font-medium bg-surface px-2 rounded-full">
+                <div key={`q-${date.getTime()}-${index}`} className="relative flex items-center py-3">
+                  <div className="absolute left-1/2 -translate-x-1/2 w-3 h-3 rounded-full bg-outline-variant/80 border-2 border-surface z-10" />
+                  <span className="ml-[calc(50%+1.25rem)] text-[11px] text-on-surface-variant/80 font-medium whitespace-nowrap">
                     {date.getFullYear()}{t('dashboard.year')} {date.getMonth() + 1}{t('dashboard.month')}
                   </span>
                 </div>
