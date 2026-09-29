@@ -4,12 +4,14 @@ export interface Subscription {
   icon: string;
   price: number;
   currency: string;
-  billingCycle: 'monthly' | 'annually';
+  billingCycle?: 'monthly' | 'annually';
   nextBillingDate: string;
+  // V1.3.9：订阅开始时间——周期由「订阅时间 → 下一个账单日」的间隔推导
+  startDate?: string;
   category: string;
   account: string;
   region: string;
-  status: 'normal' | 'urgent' | 'trial' | 'expired';
+  status: 'normal' | 'urgent' | 'soon' | 'trial' | 'expired';
   daysLeft?: number;
   // V1.3.6：时间线回溯历史账单、通行密钥列表等需要创建时间
   createdAt?: string;

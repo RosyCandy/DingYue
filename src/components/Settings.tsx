@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   User, Bell, HelpCircle, LogOut, ChevronRight, ChevronDown, RefreshCw, Palette, Languages,
-  X, Check, Loader2, Info, Mail, ArrowLeft, Fingerprint, Trash2, Pencil, ShieldCheck,
+  X, Check, Loader2, Info, Mail, ArrowLeft, Fingerprint, Trash2, Pencil, ShieldCheck, FileText,
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Language, useI18n } from '../lib/i18n';
@@ -14,6 +14,7 @@ import { useAuth } from '../lib/auth';
 import { api, resolveAssetUrl, HelpArticle, LocalizedText, PasskeyItem, SecurityOverview, UserSettings } from '../lib/api';
 import { SOCIAL_BIND_NAV_KEY } from '../lib/socialAuth';
 import { registerPasskey, beginDesktopPasskeyBridge, PASSKEY_BRIDGE_NAV_KEY, isPasskeyUserCancellation, isPasskeyAlreadyRegistered } from '../lib/passkey';
+import LegalDocument, { type LegalDocumentKind } from './LegalDocument';
 import { version as appVersion } from '../../package.json';
 
 const languageOptions: Array<{ value: Language; label: string }> = [
@@ -44,6 +45,8 @@ const VIEW_PARENT: Record<Exclude<SettingsView, 'main'>, SettingsView> = {
 export default function Settings() {
   const [view, setView] = useState<SettingsView>('main');
   const [showNotifications, setShowNotifications] = useState(false);
+  // 关于页里的用户协议/隐私政策：应用内整页查看（与登录页共用 LegalDocument）
+  const [legalKind, setLegalKind] = useState<LegalDocumentKind | null>(null);
   const [showLanguageSelect, setShowLanguageSelect] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -813,6 +816,30 @@ export default function Settings() {
                 </span>
                 <span className="text-xs text-primary font-medium">{CONTACT_EMAIL}</span>
               </a>
+
+              {/* V1.3.9：用户协议与隐私政策（应用内整页查看，与登录页一致） */}
+              <div className="bg-surface-container-low rounded-xl divide-y divide-outline-variant/10 overflow-hidden">
+                <button
+                  onClick={() => setLegalKind('agreement')}
+                  className="w-full flex items-center justify-between p-3 hover:bg-surface-container transition-colors"
+                >
+                  <span className="flex items-center gap-3 text-sm font-semibold text-on-surface">
+                    <FileText size={16} className="text-on-surface-variant" />
+                    {t('legal.agreement')}
+                  </span>
+                  <ChevronRight size={16} className="text-outline-variant" />
+                </button>
+                <button
+                  onClick={() => setLegalKind('privacy')}
+                  className="w-full flex items-center justify-between p-3 hover:bg-surface-container transition-colors"
+                >
+                  <span className="flex items-center gap-3 text-sm font-semibold text-on-surface">
+                    <ShieldCheck size={16} className="text-on-surface-variant" />
+                    {t('legal.privacy')}
+                  </span>
+                  <ChevronRight size={16} className="text-outline-variant" />
+                </button>
+              </div>
             </div>
           </div>
         );
@@ -894,6 +921,10 @@ export default function Settings() {
         );
     }
   };
+
+  if (legalKind) {
+    return <LegalDocument kind={legalKind} onBack={() => setLegalKind(null)} />;
+  }
 
   return (
     <div className="px-6 max-w-2xl mx-auto pb-10">

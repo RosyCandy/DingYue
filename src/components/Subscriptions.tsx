@@ -137,11 +137,12 @@ export default function Subscriptions() {
     }
   };
 
+  // V1.3.9：状态由 api 层按剩余天数实时推导（≤7 即将，8~15 紧急，过期=已过期）
   const statusCounts = {
     all: subscriptions.length,
     active: subscriptions.filter((sub) => sub.status === 'normal' || sub.status === 'trial').length,
     urgent: subscriptions.filter((sub) => sub.status === 'urgent').length,
-    soon: subscriptions.filter((sub) => sub.daysLeft !== undefined && sub.daysLeft > 7 && sub.daysLeft <= 30).length,
+    soon: subscriptions.filter((sub) => sub.status === 'soon').length,
     expired: subscriptions.filter((sub) => sub.status === 'expired').length,
   };
 
@@ -151,7 +152,7 @@ export default function Subscriptions() {
       statusFilter === 'all' ||
       (statusFilter === 'active' && (sub.status === 'normal' || sub.status === 'trial')) ||
       (statusFilter === 'urgent' && sub.status === 'urgent') ||
-      (statusFilter === 'soon' && sub.daysLeft !== undefined && sub.daysLeft > 7 && sub.daysLeft <= 30) ||
+      (statusFilter === 'soon' && sub.status === 'soon') ||
       (statusFilter === 'expired' && sub.status === 'expired');
     // 未填写账户的订阅归入登录邮箱账户
     const subAccount = sub.account || defaultAccount;
@@ -358,10 +359,15 @@ export default function Subscriptions() {
                     <div className="flex items-center gap-1 mt-0.5">
                       <span className={cn(
                         "text-[10px] px-2 py-0.5 font-bold rounded-md uppercase",
-                        sub.status === 'urgent' ? "bg-red-50 text-red-600" : 
+                        sub.status === 'expired' ? "bg-red-100 text-red-600" :
+                        sub.status === 'urgent' ? "bg-red-50 text-red-600" :
+                        sub.status === 'soon' ? "bg-orange-100 text-orange-600" :
                         sub.status === 'trial' ? "bg-blue-50 text-blue-600" : "bg-green-50 text-green-600"
                       )}>
-                        {sub.status === 'urgent' ? t('subs.urgent') : sub.status === 'trial' ? t('subs.statusTrial') : t('subs.statusActive')}
+                        {sub.status === 'expired' ? t('subs.expired') :
+                         sub.status === 'urgent' ? t('subs.urgent') :
+                         sub.status === 'soon' ? t('subs.soon') :
+                         sub.status === 'trial' ? t('subs.statusTrial') : t('subs.statusActive')}
                       </span>
                     </div>
                   </div>
@@ -379,7 +385,7 @@ export default function Subscriptions() {
                   <span className="text-xs font-medium truncate">{(sub.account || defaultAccount)} • {sub.region}</span>
                 </div>
                 <div className="flex items-center gap-2 mt-2">
-                  <Clock size={15} className="text-emerald-500" />
+                  <Clock size={15} className={cn("text-emerald-500", sub.status === 'expired' && "text-red-500")} />
                   <span className="text-xs font-medium text-on-surface-variant">
                     {sub.nextBillingDate}
                     {sub.daysLeft !== undefined && sub.daysLeft >= 0 && (
@@ -388,6 +394,11 @@ export default function Subscriptions() {
                         sub.daysLeft <= 7 ? "bg-red-500/10 text-red-600" : "bg-emerald-500/10 text-emerald-600"
                       )}>
                         {t('subs.endsIn')} {sub.daysLeft} {t('subs.daysLower')}
+                      </span>
+                    )}
+                    {sub.daysLeft !== undefined && sub.daysLeft < 0 && (
+                      <span className="ml-2 font-bold px-2 py-0.5 rounded-md bg-red-500/10 text-red-600">
+                        {t('subs.expired')} {Math.abs(sub.daysLeft)} {t('subs.daysLower')}
                       </span>
                     )}
                   </span>

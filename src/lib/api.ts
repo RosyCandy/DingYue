@@ -246,19 +246,32 @@ const calculateDaysLeft = (dateText?: string | null): number | undefined => {
 
 const normalizeSubscription = (item: any): Subscription => {
   const nextBillingDate = item.nextBillingDate ?? item.next_billing_date ?? '';
+  const daysLeft = calculateDaysLeft(nextBillingDate);
+  // V1.3.9：状态由剩余天数实时推导（DB 里的 status 列不会自动更新）——
+  // ≤7 天 即将，8~15 天 紧急，过了账单日 已过期；试用状态保留（已过期除外）
+  const dbStatus = (item.status || 'normal') as Subscription['status'];
+  let status: Subscription['status'] = dbStatus === 'trial' ? 'trial' : 'normal';
+  if (daysLeft !== undefined) {
+    if (daysLeft < 0) status = 'expired';
+    else if (daysLeft <= 7) status = 'soon';
+    else if (daysLeft <= 15) status = 'urgent';
+  } else if (dbStatus === 'expired') {
+    status = 'expired';
+  }
   return {
     id: String(item.id),
     name: item.name || '',
     icon: item.icon || '',
     price: Number(item.price) || 0,
     currency: item.currency || 'USD',
-    billingCycle: toBillingCycle(item.billingCycle ?? item.billing_cycle),
+    billingCycle: item.billingCycle ?? item.billing_cycle ? toBillingCycle(item.billingCycle ?? item.billing_cycle) : undefined,
     nextBillingDate: nextBillingDate ? String(nextBillingDate).slice(0, 10) : '',
+    startDate: item.startDate ?? item.start_date ? String(item.startDate ?? item.start_date).slice(0, 10) : undefined,
     category: item.category || '',
     account: item.account || '',
     region: item.region || '',
-    status: (item.status || 'normal') as Subscription['status'],
-    daysLeft: calculateDaysLeft(nextBillingDate),
+    status,
+    daysLeft,
     createdAt: item.createdAt ?? item.created_at ?? '',
   };
 };
@@ -273,6 +286,7 @@ const buildCreatePayload = (sub: Omit<Subscription, 'id'> | Record<string, any>)
     currency: input.currency || 'USD',
     billing_cycle: toBillingCycle(input.billingCycle ?? input.billing_cycle ?? 'monthly'),
     next_billing_date: nextBillingDate || null,
+    start_date: (input.startDate ?? input.start_date) || null,
     category: input.category || null,
     account: input.account || null,
     region: input.region || null,
@@ -293,6 +307,9 @@ const buildUpdatePayload = (sub: Partial<Subscription> | Record<string, any>) =>
   }
   if (input.nextBillingDate !== undefined || input.next_billing_date !== undefined) {
     payload.next_billing_date = (input.nextBillingDate ?? input.next_billing_date) || null;
+  }
+  if (input.startDate !== undefined || input.start_date !== undefined) {
+    payload.start_date = (input.startDate ?? input.start_date) || null;
   }
   if (input.category !== undefined) payload.category = input.category || null;
   if (input.account !== undefined) payload.account = input.account || null;

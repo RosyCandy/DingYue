@@ -35,8 +35,13 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
   // 免费订阅：金额置 0，但仍保留续期日期与到期提醒
   const [isFree, setIsFree] = useState(Number(initialData?.price) === 0 && Boolean(initialData));
   const [customCategories, setCustomCategories] = useState<Array<{ id: number; name: string }>>([]);
-  const [cycle, setCycle] = useState<'monthly' | 'annually'>(
-    initialData?.billingCycle === 'annually' || initialData?.billing_cycle === 'annually' ? 'annually' : 'monthly'
+  // V1.3.9：频率下拉改为「订阅时间」——周期 = 订阅时间 → 下一个账单日的间隔，
+  // 月付/季付/年付乃至任意周期都自然支持
+  const [startDate, setStartDate] = useState(
+    // 编辑旧数据（无订阅时间）时留空，保存后沿用旧 billing_cycle 口径；新建默认今天
+    initialData
+      ? (initialData?.startDate || initialData?.start_date || '')
+      : new Date().toISOString().split('T')[0]
   );
   const [nextBillingDate, setNextBillingDate] = useState(
     initialData?.nextBillingDate || initialData?.next_billing_date
@@ -67,8 +72,8 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
         account,
         price: Number.isFinite(normalizedPrice) ? normalizedPrice : 0,
         currency,
-        billingCycle: cycle,
         nextBillingDate: nextBillingDate || '',
+        startDate,
         icon: selectedIcon || '',
         status: 'normal'
       };
@@ -285,18 +290,13 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.billingFreq')}</label>
-                    <div className="relative">
-                      <select
-                        className="w-full bg-surface-container-lowest border-none rounded-lg p-4 pr-10 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm"
-                        value={cycle}
-                        onChange={(e) => setCycle(e.target.value as 'monthly' | 'annually')}
-                      >
-                        <option value="monthly">{t('add.monthly')}</option>
-                        <option value="annually">{t('add.annually')}</option>
-                      </select>
-                      <Clock className="absolute right-3 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none" size={18} />
-                    </div>
+                    <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.startDate')}</label>
+                    <input
+                      className="w-full bg-surface-container-lowest border-none rounded-lg p-4 focus:ring-2 focus:ring-primary/20 shadow-sm"
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                    />
                   </div>
                   <div className="space-y-2">
                     <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.nextBilling')}</label>

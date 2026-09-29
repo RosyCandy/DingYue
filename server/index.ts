@@ -173,6 +173,7 @@ type SubscriptionRow = {
   currency: string;
   billing_cycle: 'monthly' | 'annually';
   next_billing_date: string | null;
+  start_date?: string | null;
   category: string | null;
   account: string | null;
   region: string | null;
@@ -243,10 +244,30 @@ const parseBoolean = (value: unknown, defaultValue = false): boolean => {
   return defaultValue;
 };
 
-const toMonthlyAmount = (subscription: Pick<SubscriptionRow, 'price' | 'billing_cycle'>): number => {
+// V1.3.9：周期改为「订阅时间 → 下一个账单日」的间隔推导（天数），
+// 支持月付/季付/年付乃至任意周期；两个日期缺失或间隔不足一周时
+// 回退到旧的 billing_cycle 口径（兼容存量数据）
+const subscriptionCycleDays = (sub: Pick<SubscriptionRow, 'start_date' | 'next_billing_date' | 'billing_cycle'>): number | null => {
+  if (sub.start_date && sub.next_billing_date) {
+    const start = new Date(sub.start_date);
+    const next = new Date(sub.next_billing_date);
+    if (!Number.isNaN(start.getTime()) && !Number.isNaN(next.getTime())) {
+      const days = Math.round((next.getTime() - start.getTime()) / 86400000);
+      if (days >= 7) return days;
+    }
+  }
+  return null;
+};
+
+const toMonthlyAmount = (subscription: Pick<SubscriptionRow, 'price' | 'billing_cycle' | 'start_date' | 'next_billing_date'>): number => {
+  const price = parsePrice(subscription.price);
+  const cycleDays = subscriptionCycleDays(subscription);
+  if (cycleDays) {
+    return (price * 30.4375) / cycleDays;
+  }
   return subscription.billing_cycle === 'annually'
-    ? parsePrice(subscription.price) / 12
-    : parsePrice(subscription.price);
+    ? price / 12
+    : price;
 };
 
 // ─────────────────────────────────────────────
@@ -468,6 +489,11 @@ async function ensureDatabaseSchema() {
 
   if (!subscriptionColumnNames.has('user_id')) {
     await pool.execute('ALTER TABLE subscriptions ADD COLUMN user_id INT NULL AFTER id');
+  }
+  // V1.3.9：订阅开始时间——周期改为「订阅时间 → 下一个账单日」的间隔推导，
+  // 不再依赖下拉选择的 billing_cycle（月/年之外还能自然支持季付等任意周期）
+  if (!subscriptionColumnNames.has('start_date')) {
+    await pool.execute('ALTER TABLE subscriptions ADD COLUMN start_date DATE NULL AFTER next_billing_date');
   }
 
   const [subscriptionIndexes]: any = await pool.query(
@@ -1056,8 +1082,16 @@ const renderVerificationCodeEmailHtml = (code: string, purposeText: string) => `
 </body>
 </html>`;
 
-// 订阅到期提醒邮件（与验证码同风格的紫头卡片），由 alert@ 发出
-const renderBillingReminderEmailHtml = (subName: string, daysBefore: number, dueDate: string, priceText: string) => `
+// 订阅到期提醒邮件（与验证码同风格的紫头卡片），由 alert@ 发出。
+// V1.3.9 按用户反馈重构：订阅名称放在方框外（换色加粗），
+// 方框里放到期日期 + 金额（大号加粗，醒目）
+const renderBillingReminderEmailHtml = (
+  subName: string,
+  daysBefore: number,
+  dueDate: string,
+  priceText: string,
+  kind: 'due' | 'expired' = 'due'
+) => `
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
@@ -1070,23 +1104,29 @@ const renderBillingReminderEmailHtml = (subName: string, daysBefore: number, due
       </td>
     </tr>
     <tr>
-      <td style="padding:30px 40px 0;text-align:center;">
-        <div style="font-size:23px;font-weight:700;color:#3c3350;">订阅到期提醒</div>
+      <td style="padding:28px 40px 0;text-align:center;">
+        <div style="font-size:23px;font-weight:700;color:#3c3350;">${kind === 'expired' ? '订阅已到期' : '订阅到期提醒'}</div>
       </td>
     </tr>
     <tr>
-      <td style="padding:22px 40px 8px;text-align:center;">
-        <div style="display:inline-block;background:#f4eefc;border-radius:16px;padding:18px 30px;max-width:100%;">
-          <span style="font-size:28px;font-weight:700;color:#9a6fd0;line-height:1.3;">${subName}</span>
+      <td style="padding:16px 40px 4px;text-align:center;">
+        <div style="font-size:20px;font-weight:800;color:#7c55b8;">${subName}</div>
+      </td>
+    </tr>
+    <tr>
+      <td style="padding:14px 40px 8px;text-align:center;">
+        <div style="display:inline-block;background:#f4eefc;border-radius:16px;padding:18px 34px;max-width:100%;">
+          <div style="font-size:32px;font-weight:800;color:#7c55b8;line-height:1.25;">${dueDate}</div>
+          ${priceText ? `<div style="font-size:20px;font-weight:700;color:#9a6fd0;margin-top:8px;">${priceText}</div>` : ''}
         </div>
       </td>
     </tr>
     <tr>
       <td style="padding:14px 40px 8px;text-align:center;">
         <div style="font-size:15px;color:#5b5470;line-height:1.8;">
-          该订阅将于 <b>${dueDate}</b>（${daysBefore} 天后）到期续费。<br>
-          ${priceText ? `到期金额：${priceText}<br>` : ''}
-          如果不再需要，请记得在到期前取消，避免自动扣费。
+          ${kind === 'expired'
+            ? '该订阅已到达账单日。如果仍在使用，请在 DingYue 中更新下一个账单日；不再使用可忽略本邮件。'
+            : `${daysBefore > 0 ? `该订阅将于 <b>${daysBefore}</b> 天后到期续费。` : '该订阅将在今天到期续费。'}如果不再需要，请记得在到期前取消，避免自动扣费。`}
         </div>
       </td>
     </tr>
@@ -1102,9 +1142,10 @@ const renderBillingReminderEmailHtml = (subName: string, daysBefore: number, due
 </body>
 </html>`;
 
-// 每日到期提醒扫描：对到期前 15/7/3 天的订阅向账户邮箱发提醒，
-// subscription_reminders 表（订阅+日期唯一）保证同一订阅同一提醒日只发一次。
-const REMINDER_DAYS_BEFORE = [15, 7, 3];
+// 每日到期提醒扫描：到期前 15/7/3 天 + 到期当天 + 已过期都发提醒（V1.3.9 新增后两档），
+// subscription_reminders 表（订阅+提醒日+档位唯一）保证同一订阅同一档位只发一次。
+// 已过期按订阅列表扫描：每个未处理过的账单日发一封「已到期」提醒（days_before = -1）。
+const REMINDER_DAYS_BEFORE = [15, 7, 3, 0];
 const runBillingReminders = async (): Promise<number> => {
   if (!alertMailer || !smtpConfigured) return 0;
   const [rows]: any = await pool.query(
@@ -1114,8 +1155,9 @@ const runBillingReminders = async (): Promise<number> => {
      JOIN users u ON u.id = s.user_id
      WHERE s.next_billing_date IS NOT NULL
        AND s.status IN ('normal', 'trial')
-       AND s.next_billing_date IN
-         (CURDATE() + INTERVAL 15 DAY, CURDATE() + INTERVAL 7 DAY, CURDATE() + INTERVAL 3 DAY)`
+       AND (s.next_billing_date IN
+         (CURDATE() + INTERVAL 15 DAY, CURDATE() + INTERVAL 7 DAY, CURDATE() + INTERVAL 3 DAY, CURDATE())
+        OR s.next_billing_date < CURDATE())`
   );
   if (!Array.isArray(rows) || rows.length === 0) return 0;
 
@@ -1126,36 +1168,45 @@ const runBillingReminders = async (): Promise<number> => {
     const daysBefore = Math.round(
       (new Date(remindDate).getTime() - new Date(new Date().toDateString()).getTime()) / 86400000
     );
+    const expired = daysBefore < 0;
+    const dedupeDaysBefore = expired ? -1 : daysBefore;
     const [insertResult]: any = await pool.query(
       `INSERT IGNORE INTO subscription_reminders (subscription_id, user_id, remind_date, days_before)
        VALUES (?, ?, ?, ?)`,
-      [row.sub_id, row.user_id, remindDate, daysBefore]
+      [row.sub_id, row.user_id, remindDate, dedupeDaysBefore]
     );
     if (!insertResult || insertResult.affectedRows === 0) continue;
 
-    const monthly = row.billing_cycle === 'annually' ? Number(row.price) / 12 : Number(row.price);
     const priceText = Number(row.price) > 0
       ? `${currencySymbolServer(row.currency)}${Number(row.price).toFixed(2)}${row.billing_cycle === 'annually' ? ' / 年' : ' / 月'}`
       : '';
     const [y, m, d] = remindDate.split('-');
     const dueDateCN = `${y} 年 ${Number(m)} 月 ${Number(d)} 日`;
+    const subject = expired
+      ? `【DingYue】「${row.name}」订阅已到期`
+      : daysBefore === 0
+        ? `【DingYue】「${row.name}」今日到期`
+        : `【DingYue】「${row.name}」将于 ${daysBefore} 天后到期`;
     try {
       await alertMailer.sendMail({
         from: ALERT_FROM,
         to: row.email,
-        subject: `【DingYue】「${row.name}」将于 ${daysBefore} 天后到期`,
+        subject,
         html: renderBillingReminderEmailHtml(
           row.name,
           daysBefore,
           dueDateCN,
-          priceText
+          priceText,
+          expired ? 'expired' : 'due'
         ),
-        text: `你的订阅「${row.name}」将于 ${remindDate}（${daysBefore} 天后）到期${priceText ? '，金额 ' + priceText : ''}。如不再需要请记得取消。`
+        text: expired
+          ? `你的订阅「${row.name}」已于 ${remindDate} 到期。如仍在使用请更新下一个账单日。`
+          : `你的订阅「${row.name}」将于 ${remindDate}（${expired ? '已过期' : daysBefore + ' 天后'}）到期${priceText ? '，金额 ' + priceText : ''}。如不再需要请记得取消。`
       });
       sent += 1;
     } catch (error) {
       // 发送失败时清除防重记录，下轮重试
-      await pool.query('DELETE FROM subscription_reminders WHERE subscription_id = ? AND remind_date = ?', [row.sub_id, remindDate]);
+      await pool.query('DELETE FROM subscription_reminders WHERE subscription_id = ? AND remind_date = ? AND days_before = ?', [row.sub_id, remindDate, dedupeDaysBefore]);
       console.error('Billing reminder send failed:', error instanceof Error ? error.message : error);
     }
   }
@@ -2150,9 +2201,9 @@ app.post('/api/subscriptions', authRequired, async (req: AuthenticatedRequest, r
     const billing_cycle = normalizeBillingCycle(sub.billing_cycle);
 
     const query = `
-      INSERT INTO subscriptions 
-      (id, user_id, name, icon, price, currency, billing_cycle, next_billing_date, category, account, region, status) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO subscriptions
+      (id, user_id, name, icon, price, currency, billing_cycle, next_billing_date, start_date, category, account, region, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `;
     const values = [
       newId,
@@ -2163,6 +2214,7 @@ app.post('/api/subscriptions', authRequired, async (req: AuthenticatedRequest, r
       currency,
       billing_cycle,
       next_billing_date,
+      sub.start_date || null,
       sub.category || null,
       sub.account || null,
       sub.region || null,
@@ -2198,7 +2250,7 @@ app.put('/api/subscriptions/:id', authRequired, async (req: AuthenticatedRequest
 
     const updatableFields = [
       'name', 'icon', 'price', 'currency', 'billing_cycle',
-      'next_billing_date', 'category', 'account', 'region', 'status'
+      'next_billing_date', 'start_date', 'category', 'account', 'region', 'status'
     ];
 
     updatableFields.forEach(field => {
@@ -2210,7 +2262,7 @@ app.put('/api/subscriptions/:id', authRequired, async (req: AuthenticatedRequest
         if (field === 'billing_cycle') {
           val = normalizeBillingCycle(val);
         }
-        if (field === 'next_billing_date' && (!val || val === '')) {
+        if ((field === 'next_billing_date' || field === 'start_date') && (!val || val === '')) {
           val = null;
         }
         updates.push(`${field} = ?`);
@@ -2503,8 +2555,19 @@ const expandBillingDates = (
   const anchor = anchorRaw && anchorRaw.getTime() > created.getTime() ? anchorRaw : created;
   anchor.setHours(0, 0, 0, 0);
 
-  const stepMonths = sub.billing_cycle === 'annually' ? 12 : 1;
+  const stepMonthsBase = sub.billing_cycle === 'annually' ? 12 : 1;
   const dates: Date[] = [];
+
+  // V1.3.9：周期由「订阅时间 → 下一个账单日」推导；间隔接近整月（±3 天）时
+  // 仍按月推进以保持账单日（如每月 31 日），否则按实际天数推进（季付/任意周期）
+  const cycleDays = subscriptionCycleDays(sub);
+  const stepMonths = cycleDays
+    ? (Math.abs(Math.round(cycleDays / 30.4375) * 30.4375 - cycleDays) <= 3
+        ? Math.max(1, Math.round(cycleDays / 30.4375))
+        : 0)
+    : stepMonthsBase;
+  const stepDays = stepMonths === 0 ? (cycleDays || 30) : 0;
+  const dayOfMonth = anchor.getDate();
 
   // 以「年+月」偏移生成与锚点同日的账单日，避免 setMonth 溢出（1/31 + 1月 → 3/3）
   const shift = (d: Date, months: number): Date => {
@@ -2518,23 +2581,31 @@ const expandBillingDates = (
     target.setHours(0, 0, 0, 0);
     return target;
   };
+  const addDays = (d: Date, days: number): Date => {
+    const target = new Date(d);
+    target.setDate(target.getDate() + days);
+    target.setHours(0, 0, 0, 0);
+    return target;
+  };
+  const stepBack = (d: Date, k: number): Date => (stepMonths ? shift(d, -k * stepMonths) : addDays(d, -k * stepDays));
+  const stepForward = (d: Date, k: number): Date => (stepMonths ? shift(d, k * stepMonths) : addDays(d, k * stepDays));
 
   // 向过去展开：下限放宽到「创建日再往前一个周期」——用户拿到账单后才把订阅
   // 录入 App（created 晚于实际扣费日），当期这笔记录必须能在趋势里看到，
   // 否则刚添加的订阅在当年趋势里永远是 0（V1.3.8 用户反馈）
-  const currentPeriodStart = shift(anchor, -stepMonths).getTime();
+  const currentPeriodStart = stepBack(anchor, 1).getTime();
   const earliest = Math.min(created.getTime(), currentPeriodStart) > rangeStart.getTime()
     ? Math.min(created.getTime(), currentPeriodStart)
     : rangeStart.getTime();
   for (let k = 0; ; k++) {
-    const date = shift(anchor, -k * stepMonths);
+    const date = stepBack(anchor, k);
     if (date.getTime() < earliest) break;
     if (date.getTime() <= rangeEnd.getTime()) dates.push(date);
     if (k > 1200) break; // 保险丝：100 年
   }
   // 向未来展开（到 rangeEnd 为止）
   for (let k = 1; ; k++) {
-    const date = shift(anchor, k * stepMonths);
+    const date = stepForward(anchor, k);
     if (date.getTime() > rangeEnd.getTime()) break;
     dates.push(date);
     if (k > 1200) break;

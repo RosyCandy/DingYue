@@ -97,74 +97,94 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
   const totalMonthlyDisplay = convert(totalMonthlyUsd, 'USD', displayCurrency);
   const currencySymbol = getCurrencySymbol(displayCurrency);
 
-  const expiringSoon = subscriptions.filter(s => s.status === 'urgent');
+  const expiringSoon = subscriptions.filter(s => s.status === 'urgent' || s.status === 'soon');
 
-  // V1.3.6 时间线：过去 3 年 → 今天，今天置顶、下滑看更早的历史。
-  // （旧版是今天 → 未来 3 年，方向反了。）
-  // 订阅按周期把历史账单日往回展开（精确到日，不早于订阅创建日——添加之前的
-  // 账单不追溯），没有订阅账单的季度以季度刻度补位（精确到月）。
-  // 懒加载：一次性渲染 3 年节点太长，初始只渲染最近的节点，滚动接近底部再加载。
+  // V1.3.9 时间线：中轴线 + 双侧事件。左侧绿点 = 订阅开始（startDate），
+  // 右侧红点 = 账单日/到期日（提醒），两侧卡片都写订阅名。
+  // 周期由「订阅时间 → 下一个账单日」的间隔推导（与统计口径一致），
+  // 往回展开 3 年内的历史账单日，往前展示最近两个未来账单日作提醒。
   const timeline = React.useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const origin = new Date(today);
     origin.setFullYear(origin.getFullYear() - 3);
 
-    type TimelineEvent = { date: Date; sub?: (typeof subscriptions)[number]; quarter?: boolean };
+    type TimelineEvent =
+      | { date: Date; kind: 'today' }
+      | { date: Date; kind: 'quarter' }
+      | { date: Date; kind: 'start' | 'billing'; sub: (typeof subscriptions)[number] };
     const events: TimelineEvent[] = [];
+    const dated: Array<{ date: Date; kind: 'start' | 'billing'; sub: (typeof subscriptions)[number] }> = [];
 
-    // 1) 订阅历史账单日：从 next_billing_date（未来最近的账单日）往回按周期推
-    const subEvents: Array<{ date: Date; sub: (typeof subscriptions)[number] }> = [];
-    for (const sub of subscriptions) {
-      const anchorRaw = sub.nextBillingDate ? new Date(sub.nextBillingDate) : null;
-      if (anchorRaw && isNaN(anchorRaw.getTime())) continue;
-      const created = (sub as any).createdAt ? new Date((sub as any).createdAt) : null;
-      // 展开下限：不早于订阅创建日（有 createdAt 时），也不早于 3 年前
-      let floorDate = origin;
-      if (created && !isNaN(created.getTime()) && created > origin) floorDate = created;
-
-      let anchor = anchorRaw && anchorRaw > today ? anchorRaw : (created && !isNaN(created.getTime()) ? created : today);
-      anchor = new Date(anchor);
-      anchor.setHours(0, 0, 0, 0);
-
-      const stepMonths = (sub.billingCycle || 'monthly') === 'annually' ? 12 : 1;
-      const dayOfMonth = anchor.getDate();
-      let guard = 0;
-      let d = new Date(anchor);
-      while (d.getTime() >= floorDate.getTime() && guard < 40) {
-        if (d <= today && sub.status !== 'expired') {
-          subEvents.push({ date: new Date(d), sub });
+    const addDays = (d: Date, days: number): Date => {
+      const x = new Date(d);
+      x.setDate(x.getDate() + days);
+      x.setHours(0, 0, 0, 0);
+      return x;
+    };
+    const cycleDaysOf = (sub: (typeof subscriptions)[number]): number => {
+      if (sub.startDate && sub.nextBillingDate) {
+        const s = new Date(sub.startDate);
+        const n = new Date(sub.nextBillingDate);
+        if (!isNaN(s.getTime()) && !isNaN(n.getTime())) {
+          const days = Math.round((n.getTime() - s.getTime()) / 86400000);
+          if (days >= 7) return days;
         }
-        // 往回退一个周期（保月末：2月无30日时取月末）
-        const target = new Date(d);
-        target.setDate(1);
-        target.setMonth(target.getMonth() - stepMonths);
-        const lastDay = new Date(target.getFullYear(), target.getMonth() + 1, 0).getDate();
-        target.setDate(Math.min(dayOfMonth, lastDay));
-        target.setHours(0, 0, 0, 0);
-        d = target;
-        guard += 1;
+      }
+      return sub.billingCycle === 'annually' ? 365 : 30;
+    };
+
+    for (const sub of subscriptions) {
+      // 左侧绿点：订阅开始时间
+      if (sub.startDate) {
+        const start = new Date(sub.startDate);
+        start.setHours(0, 0, 0, 0);
+        if (!isNaN(start.getTime()) && start >= origin && start <= today) {
+          dated.push({ date: start, kind: 'start', sub });
+        }
+      }
+      // 右侧红点：账单日（周期展开）
+      if (sub.nextBillingDate) {
+        const nextRaw = new Date(sub.nextBillingDate);
+        if (isNaN(nextRaw.getTime())) continue;
+        const next = new Date(nextRaw);
+        next.setHours(0, 0, 0, 0);
+        const cycle = cycleDaysOf(sub);
+        // 未来账单日（提醒）：最多展示两个
+        let futureCount = 0;
+        let f = new Date(next);
+        while (f.getTime() >= origin.getTime() && futureCount < 2) {
+          if (f.getTime() > today.getTime()) {
+            dated.push({ date: new Date(f), kind: 'billing', sub });
+            futureCount += 1;
+          }
+          f = addDays(f, cycle);
+        }
+        // 历史账单日
+        let guard = 0;
+        let p = new Date(next);
+        while (p.getTime() >= origin.getTime() && guard < 60) {
+          if (p.getTime() <= today.getTime()) {
+            dated.push({ date: new Date(p), kind: 'billing', sub });
+          }
+          p = addDays(p, -cycle);
+          guard += 1;
+        }
       }
     }
 
-    // 2) 季度刻度：仅补位没有订阅事件的季度（过去 3 年内）
-    const quarterStarts: Date[] = [];
+    // 季度刻度：仅补位没有任何事件的季度
     let q = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1);
     while (q >= origin) {
-      quarterStarts.push(new Date(q));
+      const quarterEnd = new Date(q.getFullYear(), q.getMonth() + 3, 1);
+      const hasEvent = dated.some((e) => e.date >= q && e.date < quarterEnd);
+      if (!hasEvent) events.push({ date: new Date(q), kind: 'quarter' });
       q = new Date(q.getFullYear(), q.getMonth() - 3, 1);
     }
-    for (const qs of quarterStarts) {
-      const quarterEnd = new Date(qs.getFullYear(), qs.getMonth() + 3, 1);
-      const hasSubEvent = subEvents.some((e) => e.date >= qs && e.date < quarterEnd);
-      if (!hasSubEvent) events.push({ date: qs, quarter: true });
-    }
 
-    // 3) 今天节点（始终最上）
-    events.push({ date: new Date(today), quarter: false, sub: undefined });
-
-    // 4) 订阅事件加入并整体倒序（新的在上）；同一天的多个订阅按添加顺序
-    events.push(...subEvents.map((e) => ({ date: e.date, sub: e.sub })));
+    // 今天节点（居中置顶）
+    events.push({ date: new Date(today), kind: 'today' });
+    events.push(...dated);
     events.sort((a, b) => b.date.getTime() - a.date.getTime());
     return events;
   }, [subscriptions]);
@@ -331,85 +351,81 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
         />
       </section>
 
-      {/* Timeline View — V1.3.6：过去 3 年 → 今天，今天置顶，下滑看历史 */}
+      {/* Timeline — V1.3.9：中轴时间线，左绿点=订阅开始，右红点=账单日提醒，两侧写订阅名 */}
       <section className="space-y-4">
-        <h2 className="text-xl font-bold tracking-tight px-1">{t('dashboard.timeline')}</h2>
+        <div className="flex items-center justify-between px-1">
+          <h2 className="text-xl font-bold tracking-tight">{t('dashboard.timeline')}</h2>
+          <div className="flex items-center gap-3 text-[11px] text-on-surface-variant font-medium">
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+              {t('dashboard.legendStart')}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
+              {t('dashboard.legendRenew')}
+            </span>
+          </div>
+        </div>
 
-        <div className="relative border-l-2 border-outline-variant/20 ml-2 space-y-4 py-2">
+        <div className="relative py-2">
+          {/* 中轴 */}
+          <div className="absolute left-1/2 top-0 bottom-0 w-px bg-outline-variant/25 -translate-x-1/2" />
           {visibleTimeline.map((event, index) => {
             const date = event.date;
-            const month = date.toLocaleString('default', { month: 'short' });
-            const day = date.getDate();
-            const yearLabel = date.getFullYear();
-            const isToday = index === 0;
+            const dayLabel = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-            // 季度刻度节点：小灰点 + 月份标签
-            if (event.quarter) {
+            // 今天节点：居中
+            if (event.kind === 'today') {
               return (
-                <div key={`q-${date.getTime()}-${index}`} className="relative pl-4">
-                  <div className="absolute -left-[7px] top-1/2 -translate-y-1/2 w-3 h-3 rounded-full bg-surface-container-high border-2 border-surface"></div>
-                  <div className="py-1.5 text-sm text-on-surface-variant font-medium">
-                    {yearLabel}{t('dashboard.year')} {date.getMonth() + 1}{t('dashboard.month')}
-                  </div>
+                <div key={`today-${index}`} className="relative flex items-center justify-center py-1.5">
+                  <div className="absolute left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full bg-primary border-2 border-surface shadow-sm z-10" />
+                  <span className="bg-primary/10 text-primary text-xs font-bold px-3 py-1 rounded-full">{t('dashboard.today')}</span>
                 </div>
               );
             }
 
-            // 订阅事件节点：账单卡（同一天多个订阅按添加顺序依次排列）
-            if (event.sub) {
-              const sub = event.sub;
+            // 季度刻度：居中小灰点 + 年月
+            if (event.kind === 'quarter') {
               return (
-                <div key={`${sub.id}-${date.getTime()}-${index}`} className="relative pl-4">
-                  <div className="absolute -left-[9px] top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-primary border-4 border-surface shadow-sm"></div>
+                <div key={`q-${date.getTime()}-${index}`} className="relative flex items-center justify-center py-1">
+                  <div className="absolute left-1/2 -translate-x-1/2 w-2.5 h-2.5 rounded-full bg-surface-container-high border-2 border-surface z-10" />
+                  <span className="text-[11px] text-on-surface-variant/80 font-medium bg-surface px-2 rounded-full">
+                    {date.getFullYear()}{t('dashboard.year')} {date.getMonth() + 1}{t('dashboard.month')}
+                  </span>
+                </div>
+              );
+            }
 
-                  <div className="bg-surface-container-lowest rounded-2xl p-3 border border-outline-variant/10 shadow-sm flex items-center gap-3">
-                    <div className="flex flex-col items-center justify-center w-10 shrink-0 bg-primary/5 rounded-xl py-1.5 text-primary">
-                      <span className="text-[10px] font-bold uppercase">{month}</span>
-                      <span className="text-base font-black leading-none">{day}</span>
-                    </div>
-
-                    <div className="w-8 h-8 rounded-full overflow-hidden bg-surface-container-low shrink-0 flex items-center justify-center">
+            const sub = event.sub;
+            const isStart = event.kind === 'start';
+            return (
+              <div key={`${sub.id}-${event.kind}-${date.getTime()}-${index}`} className="relative flex items-center py-1.5">
+                {/* 中轴上的圆点：绿=订阅开始，红=账单日提醒 */}
+                <div
+                  className={cn(
+                    'absolute left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full border-2 border-surface shadow-sm z-10',
+                    isStart ? 'bg-emerald-500' : 'bg-red-500'
+                  )}
+                />
+                <div className={cn('w-[calc(50%-1.5rem)]', isStart ? 'mr-auto' : 'ml-auto')}>
+                  <div className={cn(
+                    'bg-surface-container-lowest border border-outline-variant/10 rounded-xl px-3 py-2 shadow-sm flex items-center gap-2',
+                    isStart ? 'flex-row' : 'flex-row-reverse'
+                  )}>
+                    <div className="w-7 h-7 rounded-lg overflow-hidden bg-surface-container-low shrink-0 flex items-center justify-center">
                       {sub.icon ? (
-                          <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                       ) : (
-                          <span className="text-xs font-bold text-primary uppercase">
-                            {sub.name ? sub.name.charAt(0) : '?'}
-                          </span>
+                        <span className="text-[10px] font-bold text-primary uppercase">{sub.name ? sub.name.charAt(0) : '?'}</span>
                       )}
                     </div>
-
-                    <div className="flex-1 min-w-0">
-                      <h3 className="font-bold text-on-surface text-sm truncate">{sub.name}</h3>
-                      <p className="text-[10px] text-on-surface-variant truncate">
-                        {translateCategoryName(sub.category, t)} · {isToday ? t('dashboard.today') : yearLabel}
-                      </p>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      <p className="font-bold text-on-surface text-sm">
-                        {(Number(sub.price) || 0) > 0
-                          ? `${getCurrencySymbol(sub.currency)}${(Number(sub.price) || 0).toFixed(2)}`
-                          : t('dashboard.free')}
-                      </p>
-                      <p className="text-[8px] text-on-surface-variant uppercase tracking-wider mt-0.5">
-                        {sub.billingCycle === 'monthly' ? t('dashboard.month') : t('dashboard.year')}
+                    <div className="min-w-0">
+                      <h3 className="text-sm font-bold text-on-surface truncate">{sub.name}</h3>
+                      <p className="text-[10px] text-on-surface-variant">
+                        {dayLabel} · {isStart ? t('dashboard.legendStart') : t('dashboard.legendRenew')}
                       </p>
                     </div>
                   </div>
-                </div>
-              );
-            }
-
-            // 今天节点
-            return (
-              <div key={`today-${index}`} className="relative pl-4">
-                <div className="absolute -left-[9px] top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-primary border-4 border-surface shadow-sm"></div>
-                <div className="bg-primary/5 rounded-2xl p-3 flex items-center gap-3">
-                  <div className="flex flex-col items-center justify-center w-10 shrink-0 bg-primary/10 rounded-xl py-1.5 text-primary">
-                    <span className="text-[10px] font-bold uppercase">{month}</span>
-                    <span className="text-base font-black leading-none">{day}</span>
-                  </div>
-                  <span className="text-sm font-bold text-primary">{t('dashboard.today')}</span>
                 </div>
               </div>
             );
