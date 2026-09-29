@@ -2,7 +2,7 @@
 // 离线也能秒开登录页；API 请求走公网地址（构建时注入 dist）。
 // OAuth 授权（GitHub/Gitee/微信/Google）在窗口内跳转完成，授权回调被拦截
 // 转回本地界面消费 code，全程不跳系统浏览器。
-const { app, BrowserWindow, shell, Menu, protocol, net } = require('electron');
+const { app, BrowserWindow, shell, Menu, protocol, net, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL } = require('url');
@@ -33,15 +33,16 @@ const isAllowed = (url) => {
 
 // OAuth 子窗口（桥接登录窗 / Google 选号弹窗）统一伪装成 Chrome UA：
 // accounts.google.com 会拦截 Electron UA（「此浏览器或应用可能不安全」）。
-// 主窗口保持默认 UA，isDesktopElectron() 等检测依赖它。
+// 用独立 session partition 承载子窗口——UA 在会话级设置后，子窗口的首次
+// 请求就生效（webContents.setUserAgent 对已经开始的首次导航无效）。
+// 主窗口保持默认 session + 默认 UA，isDesktopElectron() 等检测依赖它。
 const OAUTH_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
+const OAUTH_PARTITION = 'persist:oauth-child';
 
-// 子窗口（及其再弹出的窗口）统一套用导航策略与 Chrome UA。
+// 子窗口（及其再弹出的窗口）统一套用导航策略。
 // 回调页拦截只对主窗口有意义：子窗口里 OAuth 由页面内 JS 完成，不落回调页。
 function setupChildWindow(childWindow) {
-  childWindow.webContents.setUserAgent(OAUTH_USER_AGENT);
-
   childWindow.webContents.on('will-navigate', (event, url) => {
     if (!isAllowed(url)) {
       event.preventDefault();
@@ -51,7 +52,10 @@ function setupChildWindow(childWindow) {
 
   childWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowed(url)) {
-      return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } };
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: { autoHideMenuBar: true, webPreferences: { partition: OAUTH_PARTITION } }
+      };
     }
     shell.openExternal(url);
     return { action: 'deny' };
@@ -95,9 +99,19 @@ function createWindow() {
 
   mainWindow.on('page-title-updated', (event) => event.preventDefault());
 
-  // OAuth 回调页：provider 会把窗口导航到线上回调页，这里拦截，
-  // 把 code/state 带回本地界面的查询参数，由应用内消费完成登录
+  // OAuth 回调页 / 通行密钥桥接页：provider 或桥接页会把窗口导航走，这里拦截，
+  // 把参数带回本地界面消费；app:// 内部跳转（含 app://quit）直接放行到本地界面
   mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (url === 'app://quit') {
+      event.preventDefault();
+      app.quit();
+      return;
+    }
+    if (url.startsWith('app://')) {
+      event.preventDefault();
+      mainWindow.loadURL(url);
+      return;
+    }
     if (CALLBACK_PAGES.some((prefix) => url.startsWith(prefix))) {
       event.preventDefault();
       const query = url.split('?')[1] || '';
@@ -110,10 +124,13 @@ function createWindow() {
     }
   });
 
-  // GIS/授权弹窗：允许名单内的新窗口在应用内打开（桥接登录窗 / Google 选号窗）
+  // GIS/授权弹窗：允许名单内的新窗口在应用内打开（桥接登录窗等）
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (isAllowed(url)) {
-      return { action: 'allow', overrideBrowserWindowOptions: { autoHideMenuBar: true } };
+      return {
+        action: 'allow',
+        overrideBrowserWindowOptions: { autoHideMenuBar: true, webPreferences: { partition: OAUTH_PARTITION } }
+      };
     }
     shell.openExternal(url);
     return { action: 'deny' };
@@ -133,6 +150,9 @@ app.commandLine.appendSwitch('no-sandbox');
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 
 app.whenReady().then(() => {
+  // OAuth 子窗口会话：Chrome UA 从第一个请求就生效（Google 拦 Electron UA）
+  void session.fromPartition(OAUTH_PARTITION).setUserAgent(OAUTH_USER_AGENT);
+
   // app://index.html → dist/index.html；app://assets/xxx → dist/assets/xxx
   protocol.handle('app', (request) => {
     try {

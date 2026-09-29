@@ -27,9 +27,15 @@ export default function Statistics() {
   const [error, setError] = React.useState<string | null>(null);
   const { t } = useI18n();
   const { user } = useAuth();
-  const [rates] = React.useState<Record<string, number>>(FALLBACK_RATES);
+  const [rates, setRates] = React.useState<Record<string, number>>(FALLBACK_RATES);
   const displayCurrency = localStorage.getItem('display_currency') || 'USD';
   const currencySymbol = getCurrencySymbol(displayCurrency);
+  // 优先用后端实时汇率（USD 基准，6 小时缓存），失败时保留静态兜底表
+  React.useEffect(() => {
+    api.getFxRates()
+      .then((data) => setRates({ ...FALLBACK_RATES, ...data.rates }))
+      .catch(() => {});
+  }, []);
   // 统计接口的金额以 USD 为基准，展示时按首页选定的货币换算
   const convertFromUsd = (usd: number): number => {
     const rate = rates[displayCurrency] || 1;
@@ -47,6 +53,7 @@ export default function Statistics() {
   const [trendLoading, setTrendLoading] = React.useState(false);
   const [trendDirection, setTrendDirection] = React.useState(1); // 滑动方向，控制过渡动画
   const [yearPickerOpen, setYearPickerOpen] = React.useState(false);
+  const [optimizationOpen, setOptimizationOpen] = React.useState(false);
 
   const loadTrend = React.useCallback(async (year: number, month: number | null) => {
     try {
@@ -339,7 +346,7 @@ export default function Statistics() {
             <h3 className="text-xl font-bold leading-tight">{t('stats.futureForecast')}</h3>
             <p className="text-sm opacity-80 mt-2">
               {t('stats.nextCycleForecast')
-                .replace('{amount}', convertFromUsd(stats.monthlyForecast).toFixed(2))
+                .replace('{amount}', `${currencySymbol}${convertFromUsd(stats.monthlyForecast).toFixed(2)}`)
                 .replace('{count}', String(stats.activeSubscriptions))}
             </p>
           </div>
@@ -402,7 +409,11 @@ export default function Statistics() {
                     <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.color }}></div>
                     <span className="text-sm font-medium text-on-surface-variant">{translateCategory(item.name, t)}</span>
                   </div>
-                  <span className="text-sm font-bold">{item.value.toFixed(1)}%</span>
+                  {/* V1.3.8：占比按订阅数量计算（服务端下发），并展示折算后的月均金额 */}
+                  <span className="text-sm font-bold">
+                    <span className="text-on-surface-variant font-medium">{currencySymbol}{convertFromUsd(item.amount || 0).toFixed(2)}</span>
+                    <span className="ml-2">{item.value.toFixed(1)}%</span>
+                  </span>
                 </div>
               ))}
             </div>
@@ -442,7 +453,8 @@ export default function Statistics() {
           </div>
         </div>
 
-        {/* Optimization Tip */}
+        {/* Optimization Tip — V1.3.8：无可省金额时整卡隐藏；分类名翻译；查看详情页内展开 */}
+        {(stats.optimization.category && stats.optimization.potentialSavings > 0 && (stats.optimization.items?.length ?? 0) > 0) && (
         <div className="md:col-span-12 bg-surface-container-low rounded-xl p-6 border border-outline-variant/10">
           <div className="flex items-start gap-4">
             <div className="w-12 h-12 rounded-xl bg-white shadow-sm flex items-center justify-center text-primary shrink-0">
@@ -453,15 +465,30 @@ export default function Statistics() {
               <p className="text-sm text-on-surface-variant mt-1 leading-relaxed">
                 {t('stats.suggestedSavingsFor')}
                 {' '}
-                <span className="font-semibold">{stats.optimization.category || t('stats.stackedPlans')}</span>
+                <span className="font-semibold">{translateCategory(stats.optimization.category, t)}</span>
                 :
                 {' '}
                 <span className="text-primary font-bold">{currencySymbol}{convertFromUsd(stats.optimization.potentialSavings).toFixed(2)} {t('stats.perMonth')}</span>
               </p>
+              {optimizationOpen && (
+                <div className="mt-4 space-y-2 border-t border-outline-variant/15 pt-3">
+                  {stats.optimization.items!.map((item) => (
+                    <div key={item.name} className="flex justify-between text-sm">
+                      <span className="text-on-surface-variant">{item.name}</span>
+                      <span className="font-bold text-on-surface">{currencySymbol}{convertFromUsd(item.amount).toFixed(2)}{t('stats.perMonth')}</span>
+                    </div>
+                  ))}
+                  <p className="text-xs text-on-surface-variant pt-1">{t('stats.optimizationDetailHint')}</p>
+                </div>
+              )}
             </div>
-            <button className="text-primary font-bold text-sm px-4 py-2 hover:bg-white rounded-lg transition-colors whitespace-nowrap">{t('stats.reviewDetails')}</button>
+            <button onClick={() => setOptimizationOpen((v) => !v)}
+                    className="text-primary font-bold text-sm px-4 py-2 hover:bg-white rounded-lg transition-colors whitespace-nowrap">
+              {optimizationOpen ? t('stats.hideDetails') : t('stats.reviewDetails')}
+            </button>
           </div>
         </div>
+        )}
       </div>
     </div>
   );

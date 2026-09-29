@@ -9,6 +9,7 @@ import AddSubscription from './components/AddSubscription';
 import { motion, AnimatePresence } from 'motion/react';
 import { useI18n } from './lib/i18n';
 import { useAuth } from './lib/auth';
+import { Capacitor } from '@capacitor/core';
 import LoginPage from './components/LoginPage';
 import LandingPage from './components/LandingPage';
 import { api, buildApiUrl, SITE_ORIGIN } from './lib/api';
@@ -16,6 +17,7 @@ import { useTheme } from './lib/theme';
 import { consumeSocialOAuthCallback, consumeNativeOAuthCallback, closeNativeLoginBrowser, getOAuthCallbackUri, getCzlCallbackUri, SOCIAL_BIND_RESULT_KEY, SOCIAL_BIND_NAV_KEY, SOCIAL_LOGIN_ERROR_KEY, type SocialOAuthProvider } from './lib/socialAuth';
 import { useAndroidBackButton } from './lib/backButton';
 import { App as CapApp } from '@capacitor/app';
+import { PASSKEY_BRIDGE_NAV_KEY } from './lib/passkey';
 
 type Tab = 'dashboard' | 'subscriptions' | 'statistics' | 'settings';
 
@@ -184,6 +186,32 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 桌面端通行密钥桥接返回：passkey-bridge.html 在真实 origin 完成 WebAuthn 后，
+  // 导航回 app://index.html?passkey_bridge=… / ?passkey_login=…，这里消费并清理 URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const loginPayload = params.get('passkey_login');
+    const bridgeResult = params.get('passkey_bridge');
+    if (!loginPayload && !bridgeResult) return;
+    window.history.replaceState({}, '', window.location.pathname);
+    if (loginPayload) {
+      try {
+        const session = JSON.parse(decodeURIComponent(loginPayload));
+        if (session?.token && session?.user) {
+          login(session.token, session.user);
+        }
+      } catch {
+        // 忽略损坏的回传数据
+      }
+    }
+    if (bridgeResult === 'ok') {
+      // 设置页据此直接打开通行密钥列表并提示成功
+      sessionStorage.setItem(PASSKEY_BRIDGE_NAV_KEY, '1');
+    }
+    // 仅在应用挂载时消费一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   useEffect(() => {
     if (!user) return;
     let active = true;
@@ -212,10 +240,12 @@ export default function App() {
   }, [setLanguage, setTheme, user?.id]);
 
   // 未登录时先展示产品落地页（介绍 + 下载），点「进入应用」后才是登录页；
-  // 会话内点过一次就不再重复出现
+  // 会话内点过一次就不再重复出现。
+  // 桌面壳与手机/平板原生 App 一律跳过——它们是软件本体，不是官网访客
   const isDesktopApp = /Electron/i.test(navigator.userAgent);
+  const isNativeApp = Capacitor.isNativePlatform();
   const [landingVisible, setLandingVisible] = useState(
-    () => !user && !isDesktopApp && sessionStorage.getItem('landing_entered') !== '1'
+    () => !user && !isDesktopApp && !isNativeApp && sessionStorage.getItem('landing_entered') !== '1'
   );
 
   // 桌面桥接子窗口（?bridge=google / passkey）：本窗口只负责在真实站点 origin 下

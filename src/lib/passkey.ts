@@ -1,5 +1,5 @@
 import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
-import { api, AuthSessionPayload } from './api';
+import { api, AuthSessionPayload, SITE_ORIGIN } from './api';
 
 /** 在已登录的账户上注册新的通行密钥 */
 export async function registerPasskey(): Promise<{ verified: boolean; passkeyCount: number }> {
@@ -9,9 +9,28 @@ export async function registerPasskey(): Promise<{ verified: boolean; passkeyCou
 }
 
 /**
- * 桌面桥接子窗口专用：主窗口传入会话 token，在真实站点 origin 下完成注册。
- * app:// origin 通不过 WebAuthn 的 rpID 校验（Windows 桌面端一直添加失败的根因），
- * 桥接窗口里 origin 是 https://ngaasiu.studio，与 rpID 匹配。
+ * 桌面端桥接返回标记：主窗口完成 WebAuthn 回到应用后，设置页据此直接打开
+ * 通行密钥列表并提示成功（app:// 的 sessionStorage 在跨 origin 往返后仍保留）
+ */
+export const PASSKEY_BRIDGE_NAV_KEY = 'passkey_bridge_nav';
+
+/**
+ * 桌面端（Electron）：主窗口临时导航到线上桥接页 passkey-bridge.html，
+ * 在真实 https origin 下触发系统 WebAuthn（Touch ID / Windows Hello），
+ * 完成后桥接页把结果带回 app://index.html?passkey_bridge=…，由 App 消费。
+ * 此前的「子窗口 + postMessage」方案在 Windows/macOS 上系统弹窗都调不出来。
+ */
+export function beginDesktopPasskeyBridge(mode: 'register' | 'login'): void {
+  const params = new URLSearchParams({ mode });
+  if (mode === 'register') {
+    const token = localStorage.getItem('auth_token');
+    if (token) params.set('token', token);
+  }
+  window.location.href = `${SITE_ORIGIN}/passkey-bridge.html#${params.toString()}`;
+}
+
+/**
+ * 桌面桥接子窗口专用（保留给旧版本）：主窗口传入会话 token，在真实站点 origin 下完成注册。
  */
 export async function registerPasskeyWithToken(token: string): Promise<{ verified: boolean; passkeyCount: number }> {
   const optionsJSON = await api.beginPasskeyRegistration(token);

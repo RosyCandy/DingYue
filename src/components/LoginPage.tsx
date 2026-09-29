@@ -1,11 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Fingerprint, Eye, EyeOff } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
 import { useAuth } from '../lib/auth';
 import { buildApiUrl, api } from '../lib/api';
 import { useGoogleLogin, GoogleLogin } from '@react-oauth/google';
 import { isNativePlatform, signInWithGoogleNative, NativeGoogleSignInCanceledError } from '../lib/nativeGoogleAuth';
 import { beginDesktopGoogleLogin } from '../lib/socialAuth';
 import { getBridgeParams, bridgeHandshake, bridgeReturnResult } from '../lib/desktopBridge';
+import { beginDesktopPasskeyBridge } from '../lib/passkey';
+import { useBackHandler } from '../lib/backButton';
+import LegalDocument, { type LegalDocumentKind } from './LegalDocument';
 import {
     isAppleLoginAvailable,
     isWechatLoginAvailable,
@@ -42,6 +47,17 @@ export default function LoginPage() {
     const [countdown, setCountdown] = useState(0);
     const [passkeyLoading, setPasskeyLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    // 应用内协议视图：登录/注册页可打开用户协议与隐私政策查看
+    const [legalView, setLegalView] = useState<LegalDocumentKind | null>(null);
+
+    // 安卓物理返回键：注册页/找回密码/协议视图先退回登录页，而不是直接退出应用
+    useBackHandler(() => {
+        if (legalView) {
+            setLegalView(null);
+            return;
+        }
+        switchMode('login');
+    }, legalView !== null || mode !== 'login');
     const native = isNativePlatform();
     const isDesktop = native === false && /Electron/i.test(navigator.userAgent);
 
@@ -125,19 +141,66 @@ export default function LoginPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // google 桥接：握手完成后自动弹出 Google 选号窗，取消/失败则退回本页手动选择
-    const googleAutoStarted = useRef(false);
+    // google 桥接子窗口：与网页端同一套 GIS 隐式流程。
+    // 注意不能用 useGoogleLogin 的返回函数做自动拉起——它的 token client 要等
+    // GIS 脚本加载完成后才初始化，子窗口刚打开就调用会静默空转（永远转圈）。
+    // 这里轮询等 GIS 就绪后直接驱动 initTokenClient，并保留大按钮兜底。
+    const [googleBridgeReady, setGoogleBridgeReady] = useState(false);
+    const googleBridgeStarted = useRef(false);
+
     useEffect(() => {
-        if (!bridge || bridge.mode !== 'google' || googleAutoStarted.current) return;
-        googleAutoStarted.current = true;
-        const cleanup = bridgeHandshake(bridge.nonce, () => {
-            setGoogleLoading(true);
-            googleWebLogin();
-        });
-        // google 模式下主窗口不传 token；弹窗取消时恢复按钮可用
-        return () => { cleanup(); setGoogleLoading(false); };
+        if (!bridge || bridge.mode !== 'google') return;
+        let settled = false;
+        const timer = window.setInterval(() => {
+            if ((window as any).google?.accounts?.oauth2?.initTokenClient) {
+                settled = true;
+                window.clearInterval(timer);
+                setGoogleBridgeReady(true);
+            }
+        }, 150);
+        const giveUp = window.setTimeout(() => {
+            if (!settled) {
+                window.clearInterval(timer);
+                setGoogleBridgeError('Google 组件加载超时，请检查网络后点击下方按钮重试');
+            }
+        }, 20000);
+        return () => { window.clearInterval(timer); window.clearTimeout(giveUp); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
+
+    const startGoogleBridge = () => {
+        const w = window as any;
+        const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+        if (!w.google?.accounts?.oauth2 || !clientId) {
+            setGoogleBridgeError('Google 组件尚未就绪，请稍候重试');
+            return;
+        }
+        setGoogleBridgeError('');
+        const client = w.google.accounts.oauth2.initTokenClient({
+            client_id: clientId,
+            scope: 'openid email profile',
+            callback: (response: any) => {
+                if (response?.error) {
+                    // 用户关闭选号弹窗等：进入按钮态等待手动重试，而不是继续转圈
+                    setGoogleBridgeError('Google 窗口已关闭，请点击下方按钮重试');
+                    return;
+                }
+                void sendTokenToBackend(response.access_token);
+            },
+            error_callback: () => {
+                // 弹窗被拦截等非 OAuth 错误：同样回到按钮态
+                setGoogleBridgeError('未能打开 Google 窗口，请点击下方按钮重试');
+            },
+        });
+        client.requestAccessToken();
+    };
+
+    useEffect(() => {
+        if (!googleBridgeReady || googleBridgeStarted.current) return;
+        googleBridgeStarted.current = true;
+        startGoogleBridge();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [googleBridgeReady]);
 
     useEffect(() => {
         const socialError = sessionStorage.getItem(SOCIAL_LOGIN_ERROR_KEY);
@@ -281,6 +344,11 @@ export default function LoginPage() {
     };
 
     const handlePasskeyLogin = async () => {
+        // 桌面端：主窗口导航到线上桥接页完成 WebAuthn（app:// origin 无法校验 rpID）
+        if (isDesktop) {
+            beginDesktopPasskeyBridge('login');
+            return;
+        }
         setPasskeyLoading(true);
         resetMessages();
         try {
@@ -322,6 +390,11 @@ export default function LoginPage() {
     const title = mode === 'login' ? '欢迎回来' : mode === 'register' ? '创建你的账户' : '找回密码';
     const submitLabel = mode === 'login' ? '登录' : mode === 'register' ? '注册' : '重置密码';
 
+    // 用户协议 / 隐私政策：应用内整页查看，底部提供同意与退出
+    if (legalView) {
+        return <LegalDocument kind={legalView} onBack={() => setLegalView(null)} />;
+    }
+
     // 通行密钥桥接子窗口：桌面端添加通行密钥时，这里只显示过渡提示，
     // 真正的系统安全密钥弹窗由本页在真实站点 origin 下触发。
     if (bridge && bridge.mode === 'passkey') {
@@ -343,34 +416,32 @@ export default function LoginPage() {
     }
 
     // Google 登录桥接子窗口：极简过渡视图（不是完整登录页——否则桌面端会出现
-    // 「窗口里套登录页」的观感），握手完成后自动弹出 Google 选号窗，失败可就地重试。
+    // 「窗口里套登录页」的观感）。GIS 就绪后自动弹出 Google 选号窗；
+    // 弹窗被关闭或失败时按钮兜底，手动点击与网页端同一体验。
     if (bridge && bridge.mode === 'google') {
         return (
             <div className="min-h-screen flex items-center justify-center bg-surface px-6">
-                <div className="text-center space-y-5 max-w-sm">
+                <div className="text-center space-y-5 max-w-sm w-full">
                     <div className="w-16 h-16 mx-auto rounded-full bg-primary/10 flex items-center justify-center">
                         <GoogleIcon />
                     </div>
                     <h1 className="text-xl font-bold">Google 登录</h1>
                     {googleBridgeError ? (
-                        <>
-                            <p className="text-sm text-red-500">{googleBridgeError}</p>
-                            <button
-                                onClick={() => {
-                                    setGoogleBridgeError('');
-                                    googleWebLogin();
-                                }}
-                                className="px-8 py-2.5 rounded-xl bg-primary text-white font-bold text-sm active:scale-95 transition-all"
-                            >
-                                重试
-                            </button>
-                        </>
+                        <p className="text-sm text-red-500">{googleBridgeError}</p>
                     ) : (
                         <p className="text-sm text-on-surface-variant flex items-center justify-center gap-2">
                             <span className="inline-block w-4 h-4 border-2 border-primary/25 border-t-primary rounded-full animate-spin" />
                             正在打开 Google 账号选择窗口…
                         </p>
                     )}
+                    <button
+                        onClick={startGoogleBridge}
+                        className="w-full py-3 rounded-xl bg-primary text-white font-bold text-sm active:scale-95 transition-all flex items-center justify-center gap-2"
+                    >
+                        <GoogleIcon />
+                        使用 Google 账号登录
+                    </button>
+                    <p className="text-xs text-on-surface-variant">登录完成后本窗口会自动关闭并返回 DingYue。</p>
                 </div>
             </div>
         );
@@ -536,6 +607,18 @@ export default function LoginPage() {
                     <button onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}
                             className="text-primary font-bold ml-1">
                         {mode === 'forgot' ? '返回登录' : mode === 'login' ? '注册' : '登录'}
+                    </button>
+                </p>
+                <p className="text-center text-xs text-on-surface-variant pt-4">
+                    继续即代表同意
+                    <button onClick={() => setLegalView('agreement')}
+                            className="text-primary font-bold mx-1 hover:underline">
+                        用户协议
+                    </button>
+                    和
+                    <button onClick={() => setLegalView('privacy')}
+                            className="text-primary font-bold mx-1 hover:underline">
+                        隐私政策
                     </button>
                 </p>
                 <p className="text-center text-[10px] text-on-surface-variant font-medium opacity-40">

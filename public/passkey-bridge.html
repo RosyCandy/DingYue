@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>通行密钥 · DingYue</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    background: #f5f3ec; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 24px; color: #1a1c1e;
+  }
+  .card {
+    background: #fff; border-radius: 24px; padding: 40px 28px; max-width: 380px; width: 100%;
+    text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,.08);
+  }
+  .icon {
+    width: 64px; height: 64px; border-radius: 50%; background: rgba(0,84,205,.08);
+    display: flex; align-items: center; justify-content: center; margin: 0 auto 20px;
+  }
+  h1 { font-size: 20px; font-weight: 700; margin-bottom: 10px; }
+  p { font-size: 14px; color: #5b6069; line-height: 1.6; }
+  .spinner {
+    width: 18px; height: 18px; border: 2px solid rgba(0,84,205,.25); border-top-color: #0054cd;
+    border-radius: 50%; display: inline-block; vertical-align: -4px; margin-right: 8px;
+    animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .ok { color: #0a8a45; font-weight: 700; }
+  .err { color: #c62828; }
+  button {
+    margin-top: 22px; width: 100%; padding: 12px; border: 0; border-radius: 12px;
+    background: #0054cd; color: #fff; font-size: 14px; font-weight: 700; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: #5b6069; border: 1px solid #d7dbe3; margin-top: 10px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="icon">
+    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#0054cd" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 18v3c0 .6.4 1 1 1h4v-3h3v-3h2l1.4-1.4a6.5 6.5 0 1 0-4-4L2 18z"/><circle cx="16.5" cy="7.5" r="1.2" fill="#0054cd" stroke="none"/></svg>
+  </div>
+  <h1 id="title">正在添加通行密钥</h1>
+  <p id="status"><span class="spinner"></span>请按照系统弹窗完成验证；取消后本页会提示返回。</p>
+  <div id="actions" hidden>
+    <button id="retry">重试</button>
+    <button id="back" class="ghost">返回 DingYue</button>
+  </div>
+</div>
+<script>
+(function () {
+  'use strict';
+
+  var titleEl = document.getElementById('title');
+  var statusEl = document.getElementById('status');
+  var actionsEl = document.getElementById('actions');
+  var retryEl = document.getElementById('retry');
+  var backEl = document.getElementById('back');
+
+  // hash 参数：#mode=register|login&token=…（token 仅注册需要，且只在页内使用，不会发往第三方）
+  var hash = new URLSearchParams((location.hash || '').replace(/^#/, ''));
+  var mode = hash.get('mode') === 'login' ? 'login' : 'register';
+  var token = hash.get('token') || '';
+  // 用完立即从地址栏抹掉
+  history.replaceState(null, '', location.pathname);
+
+  function b64uToBuf(value) {
+    var norm = value.replace(/-/g, '+').replace(/_/g, '/');
+    while (norm.length % 4) norm += '=';
+    var raw = atob(norm);
+    var buf = new Uint8Array(raw.length);
+    for (var i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+    return buf.buffer;
+  }
+  function bufToB64u(buf) {
+    var bytes = new Uint8Array(buf);
+    var str = '';
+    for (var i = 0; i < bytes.length; i++) str += String.fromCharCode(bytes[i]);
+    return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+  }
+  function post(path, body, withToken) {
+    var headers = { 'Content-Type': 'application/json' };
+    if (withToken) headers.Authorization = 'Bearer ' + token;
+    return fetch(path, { method: 'POST', headers: headers, body: JSON.stringify(body || {}) })
+      .then(function (res) {
+        return res.json().then(function (data) {
+          if (!res.ok) throw new Error(data && data.error ? data.error : '请求失败');
+          return data;
+        });
+      });
+  }
+  function showOk(text) {
+    statusEl.innerHTML = '<span class="ok">✓ ' + text + '</span>　正在返回 DingYue…';
+    setTimeout(function () { location.href = 'app://index.html?passkey_bridge=ok'; }, 1200);
+  }
+  function fail(message) {
+    statusEl.innerHTML = '<span class="err">' + message + '</span>';
+    actionsEl.hidden = false;
+  }
+  function backToApp() { location.href = 'app://index.html'; }
+  retryEl.addEventListener('click', function () { actionsEl.hidden = true; statusEl.innerHTML = '<span class="spinner"></span>请按照系统弹窗完成验证。'; run(); });
+  backEl.addEventListener('click', backToApp);
+
+  function register() {
+    return post('/api/webauthn/register/options', {}, true).then(function (options) {
+      var publicKey = {
+        challenge: b64uToBuf(options.challenge),
+        rp: options.rp,
+        user: {
+          id: b64uToBuf(options.user.id),
+          name: options.user.name,
+          displayName: options.user.displayName || options.user.name
+        },
+        pubKeyCredParams: options.pubKeyCredParams,
+        timeout: options.timeout || 60000,
+        excludeCredentials: (options.excludeCredentials || []).map(function (c) {
+          return { id: b64uToBuf(c.id), type: 'public-key', transports: c.transports || undefined };
+        }),
+        authenticatorSelection: options.authenticatorSelection || undefined,
+        attestation: options.attestation || 'none'
+      };
+      return navigator.credentials.create({ publicKey: publicKey });
+    }).then(function (cred) {
+      var credential = {
+        id: cred.id,
+        rawId: bufToB64u(cred.rawId),
+        type: cred.type,
+        response: {
+          clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+          attestationObject: bufToB64u(cred.response.attestationObject),
+          transports: cred.response.getTransports ? cred.response.getTransports() : []
+        },
+        clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {},
+        authenticatorAttachment: cred.authenticatorAttachment || undefined
+      };
+      return post('/api/webauthn/register/verify', { credential: credential }, true).then(function (data) {
+        showOk('通行密钥已添加');
+      });
+    });
+  }
+
+  function login() {
+    return post('/api/webauthn/auth/options', {}).then(function (options) {
+      var publicKey = {
+        challenge: b64uToBuf(options.challenge),
+        rpId: options.rpId,
+        timeout: options.timeout || 60000,
+        userVerification: options.userVerification || 'preferred'
+      };
+      return navigator.credentials.get({ publicKey: publicKey });
+    }).then(function (cred) {
+      var credential = {
+        id: cred.id,
+        rawId: bufToB64u(cred.rawId),
+        type: cred.type,
+        response: {
+          clientDataJSON: bufToB64u(cred.response.clientDataJSON),
+          authenticatorData: bufToB64u(cred.response.authenticatorData),
+          signature: bufToB64u(cred.response.signature),
+          userHandle: cred.response.userHandle ? bufToB64u(cred.response.userHandle) : null
+        },
+        clientExtensionResults: cred.getClientExtensionResults ? cred.getClientExtensionResults() : {}
+      };
+      return post('/api/webauthn/auth/verify', { credential: credential }).then(function (session) {
+        // 会话数据通过本地 app:// 查询参数回传，不经任何第三方
+        var payload = encodeURIComponent(JSON.stringify({ token: session.token, user: session.user }));
+        location.href = 'app://index.html?passkey_login=' + payload;
+      });
+    });
+  }
+
+  function run() {
+    titleEl.textContent = mode === 'login' ? '通行密钥登录' : '正在添加通行密钥';
+    var p = (mode === 'login' ? login() : register());
+    p.catch(function (err) {
+      if (err && (err.name === 'NotAllowedError' || err.name === 'AbortError')) {
+        fail('操作已取消');
+      } else if (err && err.name === 'NotFoundError') {
+        fail('未找到可用的通行密钥，请先在已登录的账户中添加');
+      } else {
+        fail((err && err.message) ? String(err.message).slice(0, 120) : '操作失败');
+      }
+    });
+  }
+
+  run();
+})();
+</script>
+</body>
+</html>

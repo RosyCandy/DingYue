@@ -249,6 +249,49 @@ const toMonthlyAmount = (subscription: Pick<SubscriptionRow, 'price' | 'billing_
     : parsePrice(subscription.price);
 };
 
+// ─────────────────────────────────────────────
+// 统计口径统一为 USD 基准：订阅可能用各种货币记账，直接把原始金额相加
+// 会得出「影音占比 100.3%」这类混币元的错误结果。/api/fx/rates 有 6 小时
+// 缓存的实时汇率，这里复用同一个缓存；取不到时用静态近似表兜底。
+// ─────────────────────────────────────────────
+const FALLBACK_RATES_TO_USD: Record<string, number> = {
+  USD: 1, CNY: 7.2, EUR: 0.92, JPY: 150, GBP: 0.79, HKD: 7.8, TWD: 32, MOP: 8.03,
+  KRW: 1350, SGD: 1.34, MYR: 4.7, THB: 35, VND: 24500, PHP: 56, IDR: 15800,
+  INR: 83, PKR: 278, BDT: 110, LKR: 320, NPR: 133, KHR: 4100, LAK: 21000, MMK: 2100,
+  BND: 1.34, MNT: 3400, KZT: 450, AUD: 1.5, NZD: 1.64, CAD: 1.36, CHF: 0.88,
+  SEK: 10.5, NOK: 10.6, DKK: 6.9, ISK: 138, PLN: 4.0, CZK: 23, HUF: 360, RON: 4.6,
+  BGN: 1.8, RSD: 108, UAH: 39, RUB: 92, TRY: 32, ILS: 3.7, AED: 3.67, SAR: 3.75,
+  QAR: 3.64, KWD: 0.31, BHD: 0.38, OMR: 0.38, JOD: 0.71, EGP: 31, ZAR: 18.7,
+  NGN: 800, KES: 145, GHS: 12, MAD: 10, BRL: 5.0, MXN: 17, ARS: 350, CLP: 900,
+  COP: 4000, PEN: 3.7, UYU: 39, AZN: 1.7, GEL: 2.65, AMD: 405, BYN: 3.3, UZS: 12500,
+};
+
+// 汇率1单位货币 = rate 美元（/api/fx/rates 的 rates 以 USD 为基准：1 USD = rates[CNY] CNY）
+const currencyToUsdRate = (currency: string | null | undefined): number => {
+  const code = String(currency || 'USD').trim().toUpperCase() || 'USD';
+  if (code === 'USD') return 1;
+  const live = fxRatesCache?.rates?.[code];
+  const perUsd = Number.isFinite(live) && live > 0 ? live : FALLBACK_RATES_TO_USD[code];
+  return perUsd && perUsd > 0 ? 1 / perUsd : 1;
+};
+
+const toMonthlyAmountUsd = (sub: SubscriptionRow): number =>
+  toMonthlyAmount(sub) * currencyToUsdRate(sub.currency);
+
+// 统计接口需要汇率而缓存为空时，先拉一次（失败静默，用兜底表）
+const ensureFxRates = async (): Promise<void> => {
+  if (fxRatesCache && Date.now() - fxRatesCache.fetchedAt < 6 * 60 * 60 * 1000) return;
+  try {
+    const upstream = await directFetch('https://open.er-api.com/v6/latest/USD');
+    const data: any = await upstream.json();
+    if (data?.result === 'success' && data?.rates && typeof data.rates === 'object') {
+      fxRatesCache = { rates: data.rates, fetchedAt: Date.now() };
+    }
+  } catch {
+    // 拉不到就用 FALLBACK_RATES_TO_USD，界面照常出数
+  }
+};
+
 const sanitizeCategoryName = (value: string | null | undefined): string => {
   const name = String(value || '').trim();
   return name || 'Unassigned';
@@ -671,7 +714,7 @@ const buildAccountSummary = (subscriptions: SubscriptionRow[], ownerEmail = '') 
       nextPaymentDate: null
     };
 
-    current.monthlyTotal += toMonthlyAmount(sub);
+    current.monthlyTotal += toMonthlyAmountUsd(sub);
     current.subscriptionCount += 1;
 
     if (sub.next_billing_date) {
@@ -727,7 +770,7 @@ const buildCategorySummary = (
       customCategoryId: null,
     };
     current.count += 1;
-    current.monthlyTotal += toMonthlyAmount(sub);
+    current.monthlyTotal += toMonthlyAmountUsd(sub);
     map.set(name, current);
   });
 
@@ -745,7 +788,9 @@ const buildCategorySummary = (
 };
 
 const buildStatsOverview = (subscriptions: SubscriptionRow[], ownerEmail = '') => {
-  const monthlyForecast = subscriptions.reduce((acc, sub) => acc + toMonthlyAmount(sub), 0);
+  // V1.3.8：统计口径统一折算成 USD（订阅货币可能各不相同），
+  // 再由前端按首页展示货币二次换算
+  const monthlyForecast = subscriptions.reduce((acc, sub) => acc + toMonthlyAmountUsd(sub), 0);
   const totalYearlyForecast = monthlyForecast * 12;
   const now = new Date();
   const currentMonthIndex = now.getMonth();
@@ -758,9 +803,10 @@ const buildStatsOverview = (subscriptions: SubscriptionRow[], ownerEmail = '') =
   }));
 
   subscriptions.forEach((sub) => {
+    const monthlyUsd = toMonthlyAmountUsd(sub);
     if (sub.billing_cycle === 'monthly') {
       trend.forEach((month) => {
-        month.value += parsePrice(sub.price);
+        month.value += monthlyUsd;
       });
       return;
     }
@@ -768,7 +814,7 @@ const buildStatsOverview = (subscriptions: SubscriptionRow[], ownerEmail = '') =
     const billingMonth = sub.next_billing_date && !Number.isNaN(new Date(sub.next_billing_date).getTime())
       ? new Date(sub.next_billing_date).getMonth()
       : currentMonthIndex;
-    trend[billingMonth].value += parsePrice(sub.price);
+    trend[billingMonth].value += parsePrice(sub.price) * currencyToUsdRate(sub.currency);
   });
 
   const trendData = trend.map((item) => ({
@@ -783,10 +829,14 @@ const buildStatsOverview = (subscriptions: SubscriptionRow[], ownerEmail = '') =
     : 0;
 
   const categoryTotals = buildCategorySummary(subscriptions);
+  // 占比改为按订阅数量计算（用户预期：2 娱乐/1 效率/1 影音 = 50/25/25），
+  // 金额占比在混币场景下反而失真；分类月均金额（USD）一并提供给前端展示
+  const categoryCountTotal = categoryTotals.reduce((acc, item) => acc + item.count, 0);
   const categoryBreakdown = categoryTotals.map((item) => ({
     name: item.name,
-    amount: item.monthlyTotal,
-    value: toPercentage(item.monthlyTotal, monthlyForecast),
+    count: item.count,
+    amount: Number(item.monthlyTotal.toFixed(2)),
+    value: categoryCountTotal > 0 ? Number(((item.count / categoryCountTotal) * 100).toFixed(1)) : 0,
     color: item.color
   }));
 
@@ -803,6 +853,15 @@ const buildStatsOverview = (subscriptions: SubscriptionRow[], ownerEmail = '') =
   const potentialSavings = optimizationCandidate
     ? Number((optimizationCandidate.monthlyTotal * 0.15).toFixed(2))
     : 0;
+  // 「查看详情」用：候选分类下每个订阅的月均金额（USD）
+  const optimizationItems = optimizationCandidate
+    ? subscriptions
+        .filter((sub) => sanitizeCategoryName(sub.category) === optimizationCandidate.name)
+        .map((sub) => ({
+          name: String(sub.name || '').trim() || 'Subscription',
+          amount: Number(toMonthlyAmountUsd(sub).toFixed(2))
+        }))
+    : [];
 
   return {
     totalYearlyForecast: Number(totalYearlyForecast.toFixed(2)),
@@ -814,7 +873,8 @@ const buildStatsOverview = (subscriptions: SubscriptionRow[], ownerEmail = '') =
     accountComparison,
     optimization: {
       category: optimizationCandidate?.name || null,
-      potentialSavings
+      potentialSavings,
+      items: optimizationItems
     }
   };
 };
@@ -2459,11 +2519,16 @@ const expandBillingDates = (
     return target;
   };
 
-  // 向过去展开（不早于 created 与 rangeStart 的较大者）
-  const earliest = created.getTime() > rangeStart.getTime() ? created : rangeStart;
+  // 向过去展开：下限放宽到「创建日再往前一个周期」——用户拿到账单后才把订阅
+  // 录入 App（created 晚于实际扣费日），当期这笔记录必须能在趋势里看到，
+  // 否则刚添加的订阅在当年趋势里永远是 0（V1.3.8 用户反馈）
+  const currentPeriodStart = shift(anchor, -stepMonths).getTime();
+  const earliest = Math.min(created.getTime(), currentPeriodStart) > rangeStart.getTime()
+    ? Math.min(created.getTime(), currentPeriodStart)
+    : rangeStart.getTime();
   for (let k = 0; ; k++) {
     const date = shift(anchor, -k * stepMonths);
-    if (date.getTime() < earliest.getTime()) break;
+    if (date.getTime() < earliest) break;
     if (date.getTime() <= rangeEnd.getTime()) dates.push(date);
     if (k > 1200) break; // 保险丝：100 年
   }
@@ -2500,12 +2565,14 @@ app.get('/api/stats/trend', authRequired, async (req: AuthenticatedRequest, res)
     const dayTotals = new Array(daysInMonth).fill(0);
 
     subscriptions.forEach((sub) => {
-      const price = parsePrice(sub.price);
+      // V1.3.8：各订阅货币不同，趋势图统一折算成 USD 基准再累加，
+      // 前端再按首页展示货币换算
+      const priceUsd = parsePrice(sub.price) * currencyToUsdRate(sub.currency);
       expandBillingDates(sub, rangeStart, rangeEnd).forEach((date) => {
         if (date.getFullYear() !== year) return;
-        monthTotals[date.getMonth()] += price;
+        monthTotals[date.getMonth()] += priceUsd;
         if (month && date.getMonth() === month - 1) {
-          dayTotals[date.getDate() - 1] += price;
+          dayTotals[date.getDate() - 1] += priceUsd;
         }
       });
     });

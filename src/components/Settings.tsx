@@ -13,7 +13,7 @@ import { useBackHandler } from '../lib/backButton';
 import { useAuth } from '../lib/auth';
 import { api, resolveAssetUrl, HelpArticle, LocalizedText, PasskeyItem, SecurityOverview, UserSettings } from '../lib/api';
 import { SOCIAL_BIND_NAV_KEY } from '../lib/socialAuth';
-import { registerPasskey, isPasskeyUserCancellation, isPasskeyAlreadyRegistered } from '../lib/passkey';
+import { registerPasskey, beginDesktopPasskeyBridge, PASSKEY_BRIDGE_NAV_KEY, isPasskeyUserCancellation, isPasskeyAlreadyRegistered } from '../lib/passkey';
 import { version as appVersion } from '../../package.json';
 
 const languageOptions: Array<{ value: Language; label: string }> = [
@@ -120,6 +120,13 @@ export default function Settings() {
       setActionNotice('');
       setActionError('');
       setView('social');
+    }
+    // 桌面端通行密钥桥接完成回到应用：直接打开通行密钥列表并提示
+    if (sessionStorage.getItem(PASSKEY_BRIDGE_NAV_KEY) === '1') {
+      sessionStorage.removeItem(PASSKEY_BRIDGE_NAV_KEY);
+      setActionNotice(t('settings.passkeyAdded'));
+      setView('passkey');
+      void refreshPasskeys();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -263,24 +270,18 @@ export default function Settings() {
   const handleAddPasskey = async () => {
     setActionError('');
     setActionNotice('');
-    // 桌面端（Electron）：app:// origin 通不过 WebAuthn 的 rpID 校验，
-    // 经桥接子窗口在真实站点 origin 下完成（V1.3.5 Windows 一直失败的根因）
+    // 桌面端（Electron）：app:// origin 通不过 WebAuthn 的 rpID 校验。
+    // V1.3.8 改为主窗口导航到线上桥接页 passkey-bridge.html，在真实 https origin
+    // 下调起系统 WebAuthn（Touch ID / Windows Hello），完成后自动回到应用并
+    // 跳转通行密钥列表；此前的「子窗口 + postMessage」方案系统弹窗调不出来。
     const isDesktopApp = /Electron/i.test(navigator.userAgent);
+    if (isDesktopApp) {
+      beginDesktopPasskeyBridge('register');
+      return;
+    }
     try {
       setAddingPasskey(true);
-      let result: { verified: boolean; passkeyCount: number };
-      if (isDesktopApp) {
-        const { openDesktopBridge } = await import('../lib/desktopBridge');
-        const bridgeResult = await openDesktopBridge<{ ok: boolean; passkeyCount?: number; cancelled?: boolean; error?: string }>('passkey', { token: token || undefined });
-        if (!bridgeResult) return; // 用户关闭了桥接窗口，静默取消
-        if (!bridgeResult.ok) {
-          if (bridgeResult.cancelled) return;
-          throw new Error(bridgeResult.error || 'Failed to add passkey');
-        }
-        result = { verified: true, passkeyCount: bridgeResult.passkeyCount || 0 };
-      } else {
-        result = await registerPasskey();
-      }
+      const result = await registerPasskey();
       setSecurityOverview((prev) => (prev ? { ...prev, passkeyCount: result.passkeyCount } : prev));
       setActionNotice(t('settings.passkeyAdded'));
       await refreshPasskeys();

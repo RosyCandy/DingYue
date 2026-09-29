@@ -113,6 +113,8 @@ export interface StatsOverview {
   optimization: {
     category: string | null;
     potentialSavings: number;
+    // V1.3.8：候选分类下各订阅的月均金额（USD 基准），「查看详情」展开用
+    items?: Array<{ name: string; amount: number }>;
   };
 }
 
