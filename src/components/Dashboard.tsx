@@ -112,25 +112,8 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const addDays = (d: Date, days: number): Date => {
-      const x = new Date(d);
-      x.setDate(x.getDate() + days);
-      x.setHours(0, 0, 0, 0);
-      return x;
-    };
     const dayKey = (d: Date): string =>
       `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-    const cycleDaysOf = (sub: Subscription): number => {
-      if (sub.startDate && sub.nextBillingDate) {
-        const s = new Date(sub.startDate);
-        const n = new Date(sub.nextBillingDate);
-        if (!isNaN(s.getTime()) && !isNaN(n.getTime())) {
-          const days = Math.round((n.getTime() - s.getTime()) / 86400000);
-          if (days >= 7) return days;
-        }
-      }
-      return sub.billingCycle === 'annually' ? 365 : 30;
-    };
 
     // 1) 收集事件并按日期分组
     const groups = new Map<string, { date: Date; starts: Subscription[]; billings: Subscription[] }>();
@@ -152,16 +135,11 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
         const next = new Date(sub.nextBillingDate);
         next.setHours(0, 0, 0, 0);
         if (isNaN(next.getTime())) continue;
+        // V1.3.12：只画用户真实录入的下一个账单日——
+        // ① 过期（账单日已过）订阅不画续订点；② 不做未来周期投影，
+        // 否则会凭空捏造出 2036 年的「续订」（V1.3.11 用户反馈的幽灵订阅）
+        if (next.getTime() < today.getTime()) continue;
         add(next, 'billing', sub);
-        // 未来账单日投影（提醒）：按推导周期推进到 2036 年底
-        const cycle = cycleDaysOf(sub);
-        let f = addDays(next, cycle);
-        let guard = 0;
-        while (f.getTime() <= TIMELINE_END.getTime() && guard < 240) {
-          add(f, 'billing', sub);
-          f = addDays(f, cycle);
-          guard += 1;
-        }
       }
     }
 

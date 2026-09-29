@@ -292,7 +292,7 @@ const baseTranslations = {
     'account.perMonth': '/mo',
 
     // V1.3.6 statistics picker & timeline & passkeys
-    'stats.trendSwipeHint': 'Swipe left/right to switch month or year',
+    'stats.trendSwipeHint': 'Scroll the chart sideways to see every bar',
     'stats.byYear': 'Year',
     'stats.byMonth': 'Month',
     'stats.yearUnit': '',
@@ -595,7 +595,7 @@ const baseTranslations = {
     'account.perMonth': '/月',
 
     // V1.3.6 统计选择器 / 时间线 / 通行密钥
-    'stats.trendSwipeHint': '左右滑动切换月份或年份',
+    'stats.trendSwipeHint': '图表可左右滑动查看每根柱子',
     'stats.byYear': '年',
     'stats.byMonth': '月',
     'stats.yearUnit': '年',
@@ -880,7 +880,7 @@ const translations: Record<Language, Record<string, string>> = {
     'account.perMonth': '/月',
 
     // V1.3.6 統計選擇器 / 時間線 / 通行密鑰
-    'stats.trendSwipeHint': '左右滑動切換月份或年份',
+    'stats.trendSwipeHint': '圖表可左右滑動查看每根柱子',
     'stats.byYear': '年',
     'stats.byMonth': '月',
     'stats.yearUnit': '年',
@@ -1154,7 +1154,7 @@ const translations: Record<Language, Record<string, string>> = {
     'account.perMonth': '/mens',
 
     // V1.3.6 statisticarumlector / linea temporis / claves accessus
-    'stats.trendSwipeHint': 'Sinistram/dextram lapse ad mensem vel annum mutandum',
+    'stats.trendSwipeHint': 'Tabula laterali motu inspici potest',
     'stats.byYear': 'Annus',
     'stats.byMonth': 'Mensis',
     'stats.yearUnit': '',
@@ -1428,7 +1428,7 @@ const translations: Record<Language, Record<string, string>> = {
     'account.perMonth': '/월',
 
     // V1.3.6 통계 선택기 / 타임라인 / 패스키
-    'stats.trendSwipeHint': '좌우로 밀어 월 또는 연도를 전환하세요',
+    'stats.trendSwipeHint': '차트를 좌우로 밀어 막대를 확인하세요',
     'stats.byYear': '연',
     'stats.byMonth': '월',
     'stats.yearUnit': '년',

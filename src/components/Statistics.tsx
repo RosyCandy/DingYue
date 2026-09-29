@@ -129,11 +129,9 @@ export default function Statistics() {
 
   // 柱顶标数值（零值不标；月视图 30 根柱子只标 1/4/7…避免重叠）
   const renderBarLabel = (props: any) => {
-    const { x, y, width, value, index } = props;
+    const { x, y, width, value } = props;
     if (!value || Number(value) <= 0) return null;
-    const annual = timeRange === 'annual';
-    if (!annual && index % 3 !== 0) return null;
-    // 大数值用紧凑格式（$23.8k），避免相邻柱标签重叠
+    // 大数值用紧凑格式（$23.8k）
     const num = Number(value);
     const label = num >= 10000
       ? `$${(num / 1000).toFixed(1)}k`
@@ -144,7 +142,7 @@ export default function Statistics() {
         y={Number(y) - 4}
         textAnchor="middle"
         fill="#414755"
-        fontSize={annual ? 9 : 8}
+        fontSize={9}
         fontWeight={600}
       >
         {label}
@@ -156,23 +154,6 @@ export default function Statistics() {
     () => chartData.reduce((acc, item) => acc + item.value, 0),
     [chartData]
   );
-
-  // 触屏 / 鼠标左右滑动切换上/下一个（月或年）
-  const swipeState = React.useRef<{ x: number; y: number } | null>(null);
-  const onSwipeStart = (e: React.PointerEvent) => {
-    swipeState.current = { x: e.clientX, y: e.clientY };
-  };
-  const onSwipeEnd = (e: React.PointerEvent) => {
-    const start = swipeState.current;
-    swipeState.current = null;
-    if (!start) return;
-    const dx = e.clientX - start.x;
-    const dy = e.clientY - start.y;
-    if (Math.abs(dx) < 48 || Math.abs(dy) > Math.abs(dx)) return; // 距离不够或竖向滚动，忽略
-    const delta = dx < 0 ? 1 : -1; // 左滑 = 下一个
-    if (timeRange === 'monthly') gotoAdjacentMonth(delta);
-    else gotoAdjacentYear(delta);
-  };
 
   const hasStatsData = Boolean(
     stats && (stats.trendData.length > 0 || stats.categoryBreakdown.length > 0 || stats.accountComparison.length > 0)
@@ -331,12 +312,7 @@ export default function Statistics() {
           )}
 
           {/* 图表：左右滑动切换上/下一个月或年 */}
-          <div
-            className="h-64 w-full touch-pan-y select-none relative"
-            onPointerDown={onSwipeStart}
-            onPointerUp={onSwipeEnd}
-            onPointerCancel={() => { swipeState.current = null; }}
-          >
+          <div className="h-64 w-full overflow-x-auto no-scrollbar select-none relative rounded-lg">
             {trendLoading && (
               <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface/40 backdrop-blur-[1px] rounded-lg">
                 <Loader2 size={20} className="animate-spin text-primary" />
@@ -345,11 +321,12 @@ export default function Statistics() {
             <AnimatePresence mode="wait" initial={false}>
               <motion.div
                 key={`${timeRange}-${trendYear}-${trendMonth}`}
-                initial={{ x: trendDirection * 40, opacity: 0.4 }}
-                animate={{ x: 0, opacity: 1 }}
-                exit={{ x: trendDirection * -40, opacity: 0 }}
-                transition={{ duration: 0.22, ease: 'easeOut' }}
+                initial={{ opacity: 0.4 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.15, ease: 'easeOut' }}
                 className="h-full"
+                style={{ width: chartData.length * 64 }}
               >
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart data={chartData} margin={{ top: 14, right: 4, left: 0, bottom: 0 }}>
