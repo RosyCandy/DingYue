@@ -3431,7 +3431,8 @@ app.get('/api/fx/rates', authRequired, async (_req: AuthenticatedRequest, res) =
 });
 
 app.get('/api/help/articles', authRequired, async (_req: AuthenticatedRequest, res) => {
-  // 正文同时提供中英文，前端按用户语言选择显示
+  // 正文同时提供中英文，前端按用户语言选择显示。
+  // V1.3.11：按用户要求补全所有功能的带编号使用说明
   res.json([
     {
       id: 'billing-reminders',
@@ -3439,16 +3440,158 @@ app.get('/api/help/articles', authRequired, async (_req: AuthenticatedRequest, r
       summary: { en: 'Learn how upcoming renewals are detected and notified.', zh: '了解系统如何检测即将到来的续费并发送通知。' },
       content: {
         en: [
-          'DingYue checks the next billing date of every subscription every day.',
-          'When a renewal is within 3 days, a billing_due notification appears in the Message Center and the subscription is marked as "urgent" on the dashboard.',
-          'Free trials generate a trial_ending notification 3 days before the trial finishes, so you can cancel before being charged.',
-          'Tip: keep the next billing date accurate when adding or editing a subscription — reminders are calculated from it.'
+          '1. DingYue checks the next billing date of every subscription every day.',
+          '2. Reminder emails are sent from alert@ngaasiu.studio to your account email 15 days, 7 days, 3 days before the billing date, and on the billing day itself.',
+          '3. When a subscription passes its billing date without being updated, one "expired" email is sent for that date. If you edit the subscription start date or next billing date afterwards, a new reminder cycle begins for the new date.',
+          '4. Each reminder date is only emailed once — editing other fields (name, category, etc.) will not trigger duplicate emails.',
+          '5. Reminders also appear in the Message Center (Settings → Message Center) with severity levels: info, warning, critical.',
+          '6. Tip: keep the next billing date accurate when adding or editing a subscription — all reminders are calculated from it.'
         ],
         zh: [
-          'DingYue 每天都会检查每个订阅的下次扣费日期。',
-          '当距离续费不足 3 天时，消息中心会出现账单提醒，仪表盘上该订阅会被标记为“即将到期”。',
-          '免费试用会在结束前 3 天生成“试用即将结束”提醒，方便你在扣费前取消。',
-          '小贴士：添加或编辑订阅时请保持下次扣费日期准确，所有提醒都基于这个日期计算。'
+          '1. DingYue 每天都会检查每个订阅的下次扣费日期。',
+          '2. 提醒邮件由 alert@ngaasiu.studio 发到你的账户邮箱：到期前 15 天、7 天、3 天各一封，到期当天再发一封。',
+          '3. 账单日已过仍未更新的订阅，该日期会发一封「已到期」邮件；之后如果你重新编辑订阅时间或到期时间，新的日期会重新开始一轮提醒。',
+          '4. 每个提醒日期只发一封邮件——修改名称、分类等其他字段不会导致重复发送。',
+          '5. 提醒同时出现在消息中心（设置 → 消息中心），按紧急程度分为提示、警告、紧急三级。',
+          '6. 小贴士：添加或编辑订阅时请保持下次扣费日期准确，所有提醒都基于这个日期计算。'
+        ]
+      }
+    },
+    {
+      id: 'manage-subscriptions',
+      title: { en: 'Adding, editing and deleting subscriptions', zh: '订阅的添加、编辑与删除' },
+      summary: { en: 'Create subscriptions with start date, billing date, currency and more.', zh: '创建订阅：订阅时间、到期时间、货币等全流程说明。' },
+      content: {
+        en: [
+          '1. Tap the blue "+" button in the bottom right corner on the Home, Subscriptions or Statistics page to open the Add Subscription form.',
+          '2. Tap the dashed icon at the top left of the form to choose an icon: search online (iTunes catalog), pick from popular apps, or upload your own image.',
+          '3. Fill in the subscription name (e.g. Spotify Premium), pick a category, and optionally add a region such as "US" or "CN".',
+          '4. Choose a source (Apple App Store / Google Play / Direct Billing) and the account email the subscription belongs to — subscriptions can use any email, and the Statistics page can compare accounts.',
+          '5. Enter the amount and currency. 160+ currencies are supported; the currency defaults to your Home display currency. Toggle "Free subscription" for free plans — they are excluded from spending totals but still get expiry reminders.',
+          '6. Set the subscription start date (when you actually paid/subscribed) and the next billing date. The billing cycle is derived automatically from the interval between these two dates — monthly, quarterly, annual or any custom cycle works, so there is no cycle dropdown to worry about.',
+          '7. Tap Save. The subscription appears in the list, the Dashboard totals and the timeline immediately.',
+          '8. To edit: go to the Subscriptions page, tap a subscription card, change any field and save. To delete: open the subscription and use the delete option at the bottom.'
+        ],
+        zh: [
+          '1. 在首页、订阅页或统计页点击右下角蓝色「+」按钮，打开添加订阅表单。',
+          '2. 点击表单左上角的虚线图标选择图标：可在线搜索（iTunes 图标库）、从热门应用中挑选，或上传本地图片。',
+          '3. 填写订阅名称（如 Spotify Premium），选择分类，可选填地区（如 国区、美区）。',
+          '4. 选择来源（Apple 应用商店 / Google Play / 官网直付）和该订阅所属的账户邮箱——订阅可以填任何邮箱，统计页能按账户对比。',
+          '5. 填写金额和币种，支持 160+ 种货币，默认跟随首页展示货币；免费订阅打开「免费订阅」开关即可——不计入支出统计，但保留到期提醒。',
+          '6. 设置订阅时间（你实际付款/订阅的那天）和下一个账单日。周期由这两个日期的间隔自动推导——月付、季付、年付乃至任意周期都可以，不需要选频率。',
+          '7. 点击保存。订阅会立即出现在订阅列表、首页合计和时间线里。',
+          '8. 编辑：进入订阅页点击订阅卡片，修改任意字段后保存。删除：打开该订阅，使用底部删除按钮。'
+        ]
+      }
+    },
+    {
+      id: 'timeline-guide',
+      title: { en: 'Reading the billing timeline', zh: '账单时间线使用指南' },
+      summary: { en: 'What the green, red and half-green-half-red dots mean.', zh: '绿点、红点、半绿半红的双色点分别是什么。' },
+      content: {
+        en: [
+          '1. The timeline covers a 20-year span from January 2016 to December 2036. Scroll inside the card: the "Today" bubble is pinned at the top by default, scroll up to preview renewals up to 2036, scroll down to travel back to 2016.',
+          '2. A green dot on the left marks when a subscription started (the subscription start date you entered).',
+          '3. A red dot on the right marks a billing / renewal date — the next billing date and its future recurrences, shown as reminders.',
+          '4. Past renewal dates are intentionally not lit: a subscription created in 2025 only highlights its start date and its upcoming billing dates, not every past Sep 28.',
+          '5. If one date is both a subscription start AND another subscription\'s billing day, the dot is split into two colors — green on the left, red on the right.',
+          '6. Each card shows the subscription name, the exact date (numeric, language-neutral) and whether it is a start or a renewal.',
+          '7. Quarters without any events show a gray dot with the year and month, so you always know where you are on the axis.'
+        ],
+        zh: [
+          '1. 时间线覆盖 2016 年 1 月到 2036 年 12 月共 20 年。在卡片内上下滑动即可：「今天」气泡默认固定在顶部，往上滑可以预览到 2036 年的续费，往下滑可以回看 2016 年。',
+          '2. 左侧绿点表示订阅开始时间（你填写的「订阅时间」）。',
+          '3. 右侧红点表示账单日/到期日——即下一个账单日及其未来周期投影，用作提醒。',
+          '4. 历史账单日刻意不点亮：2025 年创建的订阅只会高亮它的开始时间和未来的账单日，过去每年 9 月 28 日不会亮红灯。',
+          '5. 如果同一天既是某个订阅的开始时间、又是另一个订阅的账单日，这个点会对半分色——左绿右红。',
+          '6. 每张卡片显示订阅名称、具体日期（纯数字，任何语言都一致）以及它是「订阅开始」还是「续费到期」。',
+          '7. 没有任何事件的季度会显示灰色圆点和年月，方便定位当前在轴上的位置。'
+        ]
+      }
+    },
+    {
+      id: 'statistics-guide',
+      title: { en: 'Using the Statistics page', zh: '统计页使用指南' },
+      summary: { en: 'Trend chart, forecast, categories, account comparison.', zh: '支出趋势、未来预测、分类明细、账户对比与优化建议。' },
+      content: {
+        en: [
+          '1. Expenditure Trend: the bar chart is always in US dollars. The Y axis starts at 0; when your largest value is within $1,000 the scale is fixed at $0–1,000 with $100 steps, and when it exceeds $1,000 the scale stretches automatically (the step is 20% of your largest value, rounded to a clean number) so bars never hit the ceiling.',
+          '2. Every bar shows its exact amount on top. Switch between Year (12 months) and Month (per day) with the toggle, swipe left/right or use the arrows to move between periods, and tap the year label to jump to any year.',
+          '3. All amounts are converted to USD at live exchange rates first, so subscriptions in different currencies (CNY, EUR, JPY...) are summed correctly.',
+          '4. Future Forecast: estimates the cost of the next billing cycle for all active subscriptions, converted to your Home display currency.',
+          '5. Category Breakdown: percentages are based on subscription counts (e.g. 2 entertainment + 1 productivity + 1 video = 50% / 25% / 25%); the converted monthly amount is shown next to each category.',
+          '6. Account Comparison: monthly spend per account email — great when your subscriptions use different emails.',
+          '7. Optimization Tip: appears when one category has 2+ paid subscriptions; tap "View details" to see the individual subscriptions and potential savings.'
+        ],
+        zh: [
+          '1. 支出趋势：柱状图始终以美元为单位。纵坐标从 0 开始，最大值不超过 $1,000 时固定用 $0–1,000（每 $100 一档）；超过 $1,000 时自动弹性拉伸（步长取最大值的 20% 并取整），柱体不会顶到图表上沿。',
+          '2. 每根柱子上方都标注具体金额。用「年/月」切换视图，左右滑动或箭头切换时间段，点击年份标签可以直接跳到任意年份。',
+          '3. 所有金额先按实时汇率折算成美元再绘图，所以人民币、欧元、日元等不同币种的订阅都能正确相加。',
+          '4. 未来支出预测：估算所有活跃订阅下一个周期的合计花费，并自动换算成首页选择的货币显示。',
+          '5. 分类明细：占比按订阅数量计算（例如 2 个娱乐 + 1 个效率 + 1 个影音 = 50% / 25% / 25%），每个分类旁边同时显示折算后的月均金额。',
+          '6. 账户对比：按账户邮箱对比每月支出——订阅填了不同邮箱时一目了然。',
+          '7. 优化建议：同一分类有 2 个及以上付费订阅时出现；点「查看详情」可以看到该分类下的订阅明细和预计可省金额。'
+        ]
+      }
+    },
+    {
+      id: 'security-guide',
+      title: { en: 'Passkeys and third-party accounts', zh: '通行密钥与第三方账号' },
+      summary: { en: 'Passkeys, Google / GitHub / Gitee / WeChat binding.', zh: '通行密钥的添加登录，以及第三方账号的绑定与解绑。' },
+      content: {
+        en: [
+          '1. Passkey sign-in lets you log in without a password. Add one in Settings → Profile & Security → Passkeys → Add passkey.',
+          '2. On desktop, the system dialog (Touch ID / Windows Hello / security key) appears automatically; on Android it is handled by your credential provider such as Bitwarden or Google Password Manager — make sure it is enabled and unlocked in system settings.',
+          '3. Each passkey can be renamed or deleted from the passkey list; deleting all login methods is prevented while one is still needed.',
+          '4. Third-party accounts: Settings → Third-party login shows Google, GitHub, Gitee and WeChat binding status. Tap a provider to bind; tap Unbind to remove the link.',
+          '5. Unbinding is refused if it would leave your account with no way to sign in (no password, no other social account and no passkey).'
+        ],
+        zh: [
+          '1. 通行密钥可以免密码登录。在 设置 → 个人与安全 → 通行密钥 → 添加通行密钥 中创建。',
+          '2. 桌面端会自动弹出系统验证（Touch ID / Windows Hello / 安全密钥）；安卓端由系统的凭据提供方处理（如 Bitwarden 或 Google 密码管理器），请确认其在系统设置中已启用并已解锁。',
+          '3. 每把通行密钥都可以重命名或删除；系统会保证账户至少保留一种登录方式，不会全部删光。',
+          '4. 第三方账号：设置 → 第三方登录 显示 Google、GitHub、Gitee、微信的绑定状态。点击对应渠道即可绑定，点击「解绑」可解除关联。',
+          '5. 如果解绑后账户将没有任何登录方式（无密码、无其他社交账号、无通行密钥），系统会拒绝解绑。'
+        ]
+      }
+    },
+    {
+      id: 'settings-guide',
+      title: { en: 'Settings: currency, language and more', zh: '设置：货币、语言与更多' },
+      summary: { en: 'Display currency, language, theme, notifications.', zh: '展示货币切换、语言、主题、消息中心与云同步。' },
+      content: {
+        en: [
+          '1. Display currency: tap the currency chip on the Home total card to pick from 160+ currencies. All totals, forecasts and statistics re-convert instantly using live exchange rates.',
+          '2. Language: Settings → Language supports English, 简体中文, 繁體中文, Latin and 한국어. Dates on the timeline are numeric so they look the same in every language.',
+          '3. Theme: light / dark follows your account setting and applies across all pages.',
+          '4. Message Center: billing reminders, trial endings and system notices appear here; tap the bell icon in Settings. Mark items read one by one or all at once.',
+          '5. Cloud Sync: your subscriptions, settings and bindings are stored on the server automatically — signing in on a new device restores everything.'
+        ],
+        zh: [
+          '1. 展示货币：点击首页总支出卡片右上角的货币标签，可从 160+ 种货币中选择。所有合计、预测和统计会按实时汇率即时换算。',
+          '2. 语言：设置 → 语言 支持 English、简体中文、繁體中文、Latin、한국어。时间线上的日期使用纯数字，任何语言下显示一致。',
+          '3. 主题：浅色 / 深色跟随账户设置，全站生效。',
+          '4. 消息中心：账单提醒、试用即将结束和系统通知都会出现在这里（设置内点铃铛图标进入），可逐条或一键标记已读。',
+          '5. 云同步：订阅、设置和第三方绑定都自动保存在服务器——换新设备登录后数据自动恢复。'
+        ]
+      }
+    },
+    {
+      id: 'account-data',
+      title: { en: 'Account and data', zh: '账户与数据' },
+      summary: { en: 'Email change, data export and account deletion.', zh: '换绑邮箱、数据导出与账户注销。' },
+      content: {
+        en: [
+          '1. Change email: Settings → Profile & Security → Email. A verification code is sent to the new address before the change takes effect.',
+          '2. Change password: Settings → Profile & Security → Password.',
+          '3. Export or permanently delete your account and all data: contact support@ngaasiu.studio — we respond within 15 business days (see Privacy Policy).',
+          '4. Danger zone: Settings → Profile & Security → Delete account permanently removes all subscriptions and settings. This cannot be undone.'
+        ],
+        zh: [
+          '1. 换绑邮箱：设置 → 个人与安全 → 邮箱。变更前会向新邮箱发送验证码确认。',
+          '2. 修改密码：设置 → 个人与安全 → 密码。',
+          '3. 导出或彻底删除账户及全部数据：联系 support@ngaasiu.studio，我们将在 15 个工作日内处理（详见隐私政策）。',
+          '4. 危险区：设置 → 个人与安全 → 删除账户 会永久清除所有订阅和设置，不可恢复，请谨慎操作。'
         ]
       }
     }

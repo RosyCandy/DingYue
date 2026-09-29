@@ -99,22 +99,18 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
 
   const expiringSoon = subscriptions.filter(s => s.status === 'urgent' || s.status === 'soon');
 
-  // V1.3.9 时间线：中轴线 + 双侧事件。左侧绿点 = 订阅开始（startDate），
-  // 右侧红点 = 账单日/到期日（提醒），两侧卡片都写订阅名。
-  // 周期由「订阅时间 → 下一个账单日」的间隔推导（与统计口径一致），
-  // 往回展开 3 年内的历史账单日，往前展示最近两个未来账单日作提醒。
+  // V1.3.11 时间线：超长跨度（2016-01 → 2036-12）+ 只亮关键点。
+  // 每个订阅只画两处：绿点 = 订阅开始（startDate），红点 = 下一个账单日及其
+  // 未来周期投影（提醒用）。历史账单日不再逐年点亮（V1.3.11 用户反馈：
+  // 25 年创建的订阅没必要把之前每年 9/28 都点亮）。
+  // 同一天既是某订阅的开始又是另一订阅的账单日 → 点对半双色（左绿右红）。
+  // 容器内滚动：默认把「今天」滚到头顶，往上滑看到 2036，往下滑回到 2016。
+  const TIMELINE_START = React.useMemo(() => new Date(2016, 0, 1), []);
+  const TIMELINE_END = React.useMemo(() => new Date(2036, 11, 31), []);
+
   const timeline = React.useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-    const origin = new Date(today);
-    origin.setFullYear(origin.getFullYear() - 3);
-
-    type TimelineEvent =
-      | { date: Date; kind: 'today' }
-      | { date: Date; kind: 'quarter' }
-      | { date: Date; kind: 'start' | 'billing'; sub: (typeof subscriptions)[number] };
-    const events: TimelineEvent[] = [];
-    const dated: Array<{ date: Date; kind: 'start' | 'billing'; sub: (typeof subscriptions)[number] }> = [];
 
     const addDays = (d: Date, days: number): Date => {
       const x = new Date(d);
@@ -122,7 +118,9 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
       x.setHours(0, 0, 0, 0);
       return x;
     };
-    const cycleDaysOf = (sub: (typeof subscriptions)[number]): number => {
+    const dayKey = (d: Date): string =>
+      `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+    const cycleDaysOf = (sub: Subscription): number => {
       if (sub.startDate && sub.nextBillingDate) {
         const s = new Date(sub.startDate);
         const n = new Date(sub.nextBillingDate);
@@ -134,72 +132,71 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
       return sub.billingCycle === 'annually' ? 365 : 30;
     };
 
+    // 1) 收集事件并按日期分组
+    const groups = new Map<string, { date: Date; starts: Subscription[]; billings: Subscription[] }>();
+    const add = (date: Date, kind: 'start' | 'billing', sub: Subscription) => {
+      if (date < TIMELINE_START || date > TIMELINE_END) return;
+      const key = dayKey(date);
+      const group = groups.get(key) || { date: new Date(date), starts: [], billings: [] };
+      (kind === 'start' ? group.starts : group.billings).push(sub);
+      groups.set(key, group);
+    };
+
     for (const sub of subscriptions) {
-      // 左侧绿点：订阅开始时间
       if (sub.startDate) {
         const start = new Date(sub.startDate);
         start.setHours(0, 0, 0, 0);
-        if (!isNaN(start.getTime()) && start >= origin && start <= today) {
-          dated.push({ date: start, kind: 'start', sub });
-        }
+        if (!isNaN(start.getTime())) add(start, 'start', sub);
       }
-      // 右侧红点：账单日（周期展开）
       if (sub.nextBillingDate) {
-        const nextRaw = new Date(sub.nextBillingDate);
-        if (isNaN(nextRaw.getTime())) continue;
-        const next = new Date(nextRaw);
+        const next = new Date(sub.nextBillingDate);
         next.setHours(0, 0, 0, 0);
+        if (isNaN(next.getTime())) continue;
+        add(next, 'billing', sub);
+        // 未来账单日投影（提醒）：按推导周期推进到 2036 年底
         const cycle = cycleDaysOf(sub);
-        // 未来账单日（提醒）：最多展示两个
-        let futureCount = 0;
-        let f = new Date(next);
-        while (f.getTime() >= origin.getTime() && futureCount < 2) {
-          if (f.getTime() > today.getTime()) {
-            dated.push({ date: new Date(f), kind: 'billing', sub });
-            futureCount += 1;
-          }
-          f = addDays(f, cycle);
-        }
-        // 历史账单日
+        let f = addDays(next, cycle);
         let guard = 0;
-        let p = new Date(next);
-        while (p.getTime() >= origin.getTime() && guard < 60) {
-          if (p.getTime() <= today.getTime()) {
-            dated.push({ date: new Date(p), kind: 'billing', sub });
-          }
-          p = addDays(p, -cycle);
+        while (f.getTime() <= TIMELINE_END.getTime() && guard < 240) {
+          add(f, 'billing', sub);
+          f = addDays(f, cycle);
           guard += 1;
         }
       }
     }
 
-    // 季度刻度：仅补位没有任何事件的季度
-    let q = new Date(today.getFullYear(), Math.floor(today.getMonth() / 3) * 3, 1);
-    while (q >= origin) {
+    // 2) 季度刻度：只补位完全没有任何事件的季度
+    const rows: Array<
+      | { kind: 'quarter'; date: Date }
+      | { kind: 'today'; date: Date }
+      | { kind: 'events'; date: Date; starts: Subscription[]; billings: Subscription[] }
+    > = [];
+    let q = new Date(TIMELINE_END.getFullYear(), Math.floor(TIMELINE_END.getMonth() / 3) * 3, 1);
+    while (q >= TIMELINE_START) {
       const quarterEnd = new Date(q.getFullYear(), q.getMonth() + 3, 1);
-      const hasEvent = dated.some((e) => e.date >= q && e.date < quarterEnd);
-      if (!hasEvent) events.push({ date: new Date(q), kind: 'quarter' });
+      const hasEvent = Array.from(groups.values()).some((g) => g.date >= q && g.date < quarterEnd);
+      if (!hasEvent) rows.push({ kind: 'quarter', date: new Date(q) });
       q = new Date(q.getFullYear(), q.getMonth() - 3, 1);
     }
+    // 3) 今天 + 事件行，整体倒序（新在上）
+    rows.push({ kind: 'today', date: new Date(today) });
+    Array.from(groups.values())
+      .sort((a, b) => b.date.getTime() - a.date.getTime())
+      .forEach((g) => rows.push({ kind: 'events', date: g.date, starts: g.starts, billings: g.billings }));
+    rows.sort((a, b) => b.date.getTime() - a.date.getTime());
+    return rows;
+  }, [subscriptions, TIMELINE_START, TIMELINE_END]);
 
-    // 今天节点（居中置顶）
-    events.push({ date: new Date(today), kind: 'today' });
-    events.push(...dated);
-    events.sort((a, b) => b.date.getTime() - a.date.getTime());
-    return events;
-  }, [subscriptions]);
-
-  // 懒加载：初始渲染最近 30 个节点，滚动接近底部时追加更早的历史
-  const [visibleCount, setVisibleCount] = React.useState(30);
-  const visibleTimeline = timeline.slice(0, visibleCount);
+  // 容器内滚动定位：挂载/数据变化后把「今天」滚到容器顶部
+  // （todayRow 的 offsetParent 就是滚动容器本身，offsetTop 已是容器内坐标）
+  const timelineScrollRef = React.useRef<HTMLDivElement>(null);
+  const todayRowRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
-    const onScroll = () => {
-      const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 600;
-      if (nearBottom) setVisibleCount((c) => Math.min(c + 30, timeline.length));
-    };
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => window.removeEventListener('scroll', onScroll);
-  }, [timeline.length]);
+    const container = timelineScrollRef.current;
+    const today = todayRowRef.current;
+    if (!container || !today) return;
+    container.scrollTop = Math.max(0, today.offsetTop - 8);
+  }, [timeline]);
 
   const activePaidSubs = subscriptions.filter(s => s.status !== 'trial');
   const trialSubs = subscriptions.filter(s => s.status === 'trial');
@@ -351,7 +348,9 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
         />
       </section>
 
-      {/* Timeline — V1.3.9：中轴时间线，左绿点=订阅开始，右红点=账单日提醒，两侧写订阅名 */}
+      {/* Timeline — V1.3.11：2016→2036 超长跨度，容器内滚动，默认「今天」在头顶。
+          绿点=订阅开始，红点=账单日提醒（含未来周期投影），同一天既是开始又是
+          账单日→左绿右红对半双色点；两侧卡片写订阅名，日期为纯数字。 */}
       <section className="space-y-4">
         <div className="flex items-center justify-between px-1 flex-wrap gap-y-1">
           <h2 className="text-xl font-bold tracking-tight">{t('dashboard.timeline')}</h2>
@@ -364,24 +363,33 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
               <span className="w-2 h-2 rounded-full bg-red-500 inline-block" />
               {t('dashboard.legendRenew')}
             </span>
+            <span className="flex items-center gap-1.5">
+              <span
+                className="w-2 h-2 rounded-full inline-block"
+                style={{ background: 'linear-gradient(90deg, #10b981 50%, #ef4444 50%)' }}
+              />
+              {t('dashboard.legendBoth')}
+            </span>
           </div>
         </div>
 
-        <div className="relative py-2">
+        <div
+          ref={timelineScrollRef}
+          className="relative max-h-[32rem] overflow-y-auto no-scrollbar rounded-2xl border border-outline-variant/10 bg-surface-container-lowest/60 p-3"
+        >
           {/* 中轴 */}
           <div className="absolute left-1/2 top-0 bottom-0 w-px bg-outline-variant/25 -translate-x-1/2" />
-          {visibleTimeline.map((event, index) => {
+          {timeline.map((event, index) => {
             const date = event.date;
-            // V1.3.10：日期用纯数字（M/D，跨年带年份）——任何语言都无歧义，
-            // 不再依赖 toLocaleDateString 的月份名（WebView 语言与应用语言不一致时会露英文）
+            // 纯数字日期（M/D，跨年带年份）——任何语言都无歧义
             const dayLabel = date.getFullYear() === new Date().getFullYear()
               ? `${date.getMonth() + 1}/${date.getDate()}`
               : `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`;
 
-            // 今天节点：只有气泡本身骑在中轴上（V1.3.10 用户反馈：不要蓝点和虚线）
+            // 今天节点：只有气泡本身骑在中轴上
             if (event.kind === 'today') {
               return (
-                <div key={`today-${index}`} className="relative flex items-center justify-center py-2">
+                <div key={`today-${index}`} ref={todayRowRef} className="relative flex items-center justify-center py-2">
                   <span className="relative z-10 bg-primary/10 border border-primary/25 text-primary text-xs font-bold px-3 py-1 rounded-full whitespace-nowrap">
                     {t('dashboard.today')}
                   </span>
@@ -389,8 +397,7 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
               );
             }
 
-            // 季度刻度：无订阅事件的占位点，灰点 + 日期放点的右边；
-            // 行距放宽到与订阅卡片行一致（V1.3.10 用户反馈：太挤、点看不清）
+            // 季度刻度：无订阅事件的占位点，灰点 + 日期在点的右边
             if (event.kind === 'quarter') {
               return (
                 <div key={`q-${date.getTime()}-${index}`} className="relative flex items-center py-3">
@@ -402,36 +409,47 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
               );
             }
 
-            const sub = event.sub;
-            const isStart = event.kind === 'start';
-            return (
-              <div key={`${sub.id}-${event.kind}-${date.getTime()}-${index}`} className="relative flex items-center py-1.5">
-                {/* 中轴上的圆点：绿=订阅开始，红=账单日提醒 */}
-                <div
-                  className={cn(
-                    'absolute left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full border-2 border-surface shadow-sm z-10',
-                    isStart ? 'bg-emerald-500' : 'bg-red-500'
+            const { starts, billings } = event;
+            const dotColor = starts.length && billings.length
+              ? 'linear-gradient(90deg, #10b981 50%, #ef4444 50%)'
+              : starts.length ? '#10b981' : '#ef4444';
+
+            const renderCard = (sub: Subscription, kind: 'start' | 'billing') => (
+              <div
+                key={`${sub.id}-${kind}`}
+                className={cn(
+                  'bg-surface border border-outline-variant/10 rounded-xl px-3 py-2 shadow-sm flex items-center gap-2',
+                  kind === 'start' ? 'flex-row' : 'flex-row-reverse'
+                )}
+              >
+                <div className="w-7 h-7 rounded-lg overflow-hidden bg-surface-container-low shrink-0 flex items-center justify-center">
+                  {sub.icon ? (
+                    <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                  ) : (
+                    <span className="text-[10px] font-bold text-primary uppercase">{sub.name ? sub.name.charAt(0) : '?'}</span>
                   )}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-on-surface truncate">{sub.name}</h3>
+                  <p className="text-[10px] text-on-surface-variant">
+                    {dayLabel} · {kind === 'start' ? t('dashboard.legendStart') : t('dashboard.legendRenew')}
+                  </p>
+                </div>
+              </div>
+            );
+
+            return (
+              <div key={`e-${dayLabel}-${date.getFullYear()}-${index}`} className="relative flex items-center py-1.5">
+                {/* 中轴圆点：绿=开始，红=账单日，双色=两者同日 */}
+                <div
+                  className="absolute left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded-full border-2 border-surface shadow-sm z-10"
+                  style={{ background: dotColor }}
                 />
-                <div className={cn('w-[calc(50%-1.5rem)]', isStart ? 'mr-auto' : 'ml-auto')}>
-                  <div className={cn(
-                    'bg-surface-container-lowest border border-outline-variant/10 rounded-xl px-3 py-2 shadow-sm flex items-center gap-2',
-                    isStart ? 'flex-row' : 'flex-row-reverse'
-                  )}>
-                    <div className="w-7 h-7 rounded-lg overflow-hidden bg-surface-container-low shrink-0 flex items-center justify-center">
-                      {sub.icon ? (
-                        <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                      ) : (
-                        <span className="text-[10px] font-bold text-primary uppercase">{sub.name ? sub.name.charAt(0) : '?'}</span>
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <h3 className="text-sm font-bold text-on-surface truncate">{sub.name}</h3>
-                      <p className="text-[10px] text-on-surface-variant">
-                        {dayLabel} · {isStart ? t('dashboard.legendStart') : t('dashboard.legendRenew')}
-                      </p>
-                    </div>
-                  </div>
+                <div className="w-[calc(50%-1.5rem)] mr-auto space-y-2">
+                  {starts.map((sub) => renderCard(sub, 'start'))}
+                </div>
+                <div className="w-[calc(50%-1.5rem)] ml-auto space-y-2">
+                  {billings.map((sub) => renderCard(sub, 'billing'))}
                 </div>
               </div>
             );

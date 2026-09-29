@@ -202,6 +202,7 @@ const baseTranslations = {
     'dashboard.timeline': 'Timeline',
     'dashboard.legendStart': 'Subscribed',
     'dashboard.legendRenew': 'Renewal',
+    'dashboard.legendBoth': 'Start + Renewal',
     'dashboard.timelineEmpty': 'No billing events yet',
     'dashboard.timelineEmptyHint': 'Add a subscription to see its renewal timeline here.',
 
@@ -504,6 +505,7 @@ const baseTranslations = {
     'dashboard.timeline': '账单时间线',
     'dashboard.legendStart': '订阅开始',
     'dashboard.legendRenew': '续费到期',
+    'dashboard.legendBoth': '开始+续费',
     'dashboard.timelineEmpty': '还没有账单事件',
     'dashboard.timelineEmptyHint': '添加订阅后，续费时间线会显示在这里。',
 
@@ -795,6 +797,7 @@ const translations: Record<Language, Record<string, string>> = {
     'dashboard.timeline': '帳單時間線',
     'dashboard.legendStart': '訂閱開始',
     'dashboard.legendRenew': '續費到期',
+    'dashboard.legendBoth': '開始+續費',
 
     'subs.searchPlaceholder': '搜尋訂閱...',
     'subs.search': '搜尋',
@@ -1068,6 +1071,7 @@ const translations: Record<Language, Record<string, string>> = {
     'dashboard.timeline': 'Linea Temporis',
     'dashboard.legendStart': 'Initium',
     'dashboard.legendRenew': 'Renovatio',
+    'dashboard.legendBoth': 'Initium + Renovatio',
 
     'subs.searchPlaceholder': 'Quaere subscriptiones...',
     'subs.search': 'Quaere',
@@ -1341,6 +1345,7 @@ const translations: Record<Language, Record<string, string>> = {
     'dashboard.timeline': '타임라인',
     'dashboard.legendStart': '구독 시작',
     'dashboard.legendRenew': '갱신 만료',
+    'dashboard.legendBoth': '시작+갱신',
 
     'subs.searchPlaceholder': '구독 검색...',
     'subs.search': '검색',
@@ -1451,10 +1456,13 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
   const t = (key: string) => {
     const result = translations[language][key];
-    if (!result) {
+    // 允许空字符串作为合法翻译（如英文的 yearUnit 想留空），
+    // 只有 key 完全缺失时才回退到 key 本身
+    if (result === undefined) {
       console.warn(`[i18n] Missing translation key: "${key}" for language: ${language}`);
+      return key;
     }
-    return result || key;
+    return result;
   };
 
   return (

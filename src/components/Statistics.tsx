@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart, Bar, XAxis, ResponsiveContainer, Cell, PieChart, Pie, CartesianGrid } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Cell, PieChart, Pie, CartesianGrid, LabelList } from 'recharts';
 import { TrendingUp, Lightbulb, Loader2, ChevronLeft, ChevronRight, ChevronDown, CalendarDays } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -104,6 +104,53 @@ export default function Statistics() {
     if (!trend) return [];
     return timeRange === 'monthly' ? trend.days : trend.months;
   }, [trend, timeRange]);
+
+  // V1.3.11 纵坐标锁死美元：≤1000 固定 0-1000（每 100 一档）；
+  // 超过则弹性——步长 = 图内最大值的 20% 取整到 1/2/2.5/5×10^n，
+  // 刻度覆盖到 ≥ 最大值（如最大 23800 → 步长 5000 → 0~25000），
+  // 柱体不再顶到图表上沿
+  const yScale = React.useMemo(() => {
+    const values = chartData.map((d) => d.value || 0);
+    const maxVal = Math.max(...values, 0);
+    if (maxVal <= 1000) {
+      return { ticks: Array.from({ length: 11 }, (_, i) => i * 100) };
+    }
+    const rawStep = maxVal * 0.2;
+    const pow = Math.pow(10, Math.floor(Math.log10(rawStep)));
+    const norm = rawStep / pow;
+    const nice = norm <= 1 ? 1 : norm <= 2 ? 2 : norm <= 2.5 ? 2.5 : norm <= 5 ? 5 : 10;
+    const step = nice * pow;
+    const ticks: number[] = [0];
+    while (ticks[ticks.length - 1] < maxVal && ticks.length < 10) {
+      ticks.push(Number((ticks[ticks.length - 1] + step).toFixed(2)));
+    }
+    return { ticks };
+  }, [chartData]);
+
+  // 柱顶标数值（零值不标；月视图 30 根柱子只标 1/4/7…避免重叠）
+  const renderBarLabel = (props: any) => {
+    const { x, y, width, value, index } = props;
+    if (!value || Number(value) <= 0) return null;
+    const annual = timeRange === 'annual';
+    if (!annual && index % 3 !== 0) return null;
+    // 大数值用紧凑格式（$23.8k），避免相邻柱标签重叠
+    const num = Number(value);
+    const label = num >= 10000
+      ? `$${(num / 1000).toFixed(1)}k`
+      : `$${num.toLocaleString('en-US', { maximumFractionDigits: 2 })}`;
+    return (
+      <text
+        x={Number(x) + Number(width) / 2}
+        y={Number(y) - 4}
+        textAnchor="middle"
+        fill="#414755"
+        fontSize={annual ? 9 : 8}
+        fontWeight={600}
+      >
+        {label}
+      </text>
+    );
+  };
 
   const rangeTotal = React.useMemo(
     () => chartData.reduce((acc, item) => acc + item.value, 0),
@@ -305,17 +352,29 @@ export default function Statistics() {
                 className="h-full"
               >
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData}>
+                  <BarChart data={chartData} margin={{ top: 14, right: 4, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e3e6ef" />
-                    <XAxis
-                      dataKey="label"
+                    {/* 纵坐标：锁死美元单位 */}
+                    <YAxis
+                      ticks={yScale.ticks}
+                      domain={[0, yScale.ticks[yScale.ticks.length - 1]]}
+                      tickFormatter={(v) => `$${Number(v).toLocaleString('en-US')}`}
+                      tick={{ fontSize: 9, fill: '#414755' }}
                       axisLine={false}
                       tickLine={false}
+                      width={56}
+                    />
+                    {/* 横坐标：月份（年视图）/ 日期（月视图），轴线可见 */}
+                    <XAxis
+                      dataKey="label"
+                      axisLine={{ stroke: '#c9cdd8' }}
+                      tickLine={false}
                       tick={{ fontSize: 10, fill: '#414755' }}
-                      dy={10}
+                      dy={8}
                       interval={timeRange === 'monthly' && chartData.length > 20 ? 2 : 0}
                     />
                     <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                      <LabelList dataKey="value" content={renderBarLabel} />
                       {chartData.map((entry, index) => {
                         const isNow =
                           timeRange === 'monthly'
