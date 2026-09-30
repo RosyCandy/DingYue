@@ -12,6 +12,7 @@ import SocialLoginPage from './SocialLoginPage';
 import { useBackHandler } from '../lib/backButton';
 import { useAuth } from '../lib/auth';
 import { api, resolveAssetUrl, HelpArticle, LocalizedText, PasskeyItem, SecurityOverview, UserSettings } from '../lib/api';
+import { Subscription } from '../constants';
 import { SOCIAL_BIND_NAV_KEY } from '../lib/socialAuth';
 import { registerPasskey, beginDesktopPasskeyBridge, PASSKEY_BRIDGE_NAV_KEY, isPasskeyUserCancellation, isPasskeyAlreadyRegistered } from '../lib/passkey';
 import LegalDocument, { type LegalDocumentKind } from './LegalDocument';
@@ -28,7 +29,7 @@ const languageOptions: Array<{ value: Language; label: string }> = [
 const CONTACT_EMAIL = 'support@ngaasiu.studio';
 
 // 站内导航：个人中心及其子页面在设置页内部切换（类似微信），不弹窗
-type SettingsView = 'main' | 'profile' | 'nickname' | 'email' | 'password' | 'passkey' | 'danger' | 'social' | 'help' | 'about';
+type SettingsView = 'main' | 'profile' | 'nickname' | 'email' | 'password' | 'passkey' | 'danger' | 'social' | 'help' | 'about' | 'recycle';
 
 const VIEW_PARENT: Record<Exclude<SettingsView, 'main'>, SettingsView> = {
   profile: 'main',
@@ -40,6 +41,7 @@ const VIEW_PARENT: Record<Exclude<SettingsView, 'main'>, SettingsView> = {
   social: 'profile',
   help: 'main',
   about: 'main',
+  recycle: 'main',
 };
 
 export default function Settings() {
@@ -47,6 +49,45 @@ export default function Settings() {
   const [showNotifications, setShowNotifications] = useState(false);
   // 关于页里的用户协议/隐私政策：应用内整页查看（与登录页共用 LegalDocument）
   const [legalKind, setLegalKind] = useState<LegalDocumentKind | null>(null);
+  // V1.4.0：回收站（软删除订阅，30 天后自动永久清除）
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [deletedSubs, setDeletedSubs] = useState<Subscription[]>([]);
+  const [selectedDeleted, setSelectedDeleted] = useState<string[]>([]);
+  const [recycleLoading, setRecycleLoading] = useState(false);
+  const [recycleBusy, setRecycleBusy] = useState(false);
+
+  const loadDeletedSubs = async () => {
+    try {
+      setRecycleLoading(true);
+      setDeletedSubs(await api.getDeletedSubscriptions());
+      setSelectedDeleted([]);
+    } catch {
+      setDeletedSubs([]);
+    } finally {
+      setRecycleLoading(false);
+    }
+  };
+
+  const handleRestoreDeleted = async (id: string) => {
+    try {
+      setRecycleBusy(true);
+      await api.restoreSubscription(id);
+      await loadDeletedSubs();
+    } finally {
+      setRecycleBusy(false);
+    }
+  };
+
+  const handlePurgeSelected = async () => {
+    if (selectedDeleted.length === 0 || !window.confirm(t('recycle.purgeConfirm'))) return;
+    try {
+      setRecycleBusy(true);
+      await Promise.all(selectedDeleted.map((id) => api.purgeSubscription(id)));
+      await loadDeletedSubs();
+    } finally {
+      setRecycleBusy(false);
+    }
+  };
   const [showLanguageSelect, setShowLanguageSelect] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
@@ -754,6 +795,71 @@ export default function Settings() {
       case 'social':
         return <SocialLoginPage onBack={goBack} />;
 
+      case 'recycle':
+        return (
+          <div>
+            <SubPageHeader title={t('settings.recycleBin')} onBack={goBack} />
+            <div className="pt-6 space-y-4">
+              <p className="text-xs text-on-surface-variant px-1">{t('recycle.autoHint')}</p>
+              {recycleLoading ? (
+                <div className="py-10 flex justify-center text-on-surface-variant"><Loader2 size={20} className="animate-spin" /></div>
+              ) : deletedSubs.length === 0 ? (
+                <p className="text-center text-sm text-on-surface-variant py-12">{t('recycle.empty')}</p>
+              ) : (
+                <>
+                  <label className="flex items-center gap-3 px-1 text-sm text-on-surface-variant cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedDeleted.length === deletedSubs.length && deletedSubs.length > 0}
+                      onChange={(e) => setSelectedDeleted(e.target.checked ? deletedSubs.map((s) => s.id) : [])}
+                      className="w-4 h-4 accent-[#0054cd]"
+                    />
+                    {t('recycle.selectAll')}
+                  </label>
+                  <div className="space-y-2">
+                    {deletedSubs.map((sub) => (
+                      <div key={sub.id} className="flex items-center gap-3 bg-surface-container-low rounded-xl p-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedDeleted.includes(sub.id)}
+                          onChange={(e) => setSelectedDeleted((prev) => e.target.checked ? [...prev, sub.id] : prev.filter((x) => x !== sub.id))}
+                          className="w-4 h-4 accent-[#0054cd] shrink-0"
+                        />
+                        <div className="w-8 h-8 rounded-lg overflow-hidden bg-surface-container-lowest shrink-0 flex items-center justify-center">
+                          {sub.icon ? (
+                            <img src={resolveAssetUrl(sub.icon)} alt={sub.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                          ) : (
+                            <span className="text-xs font-bold text-primary uppercase">{sub.name ? sub.name.charAt(0) : '?'}</span>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <h3 className="text-sm font-bold text-on-surface truncate">{sub.name}</h3>
+                          <p className="text-[10px] text-on-surface-variant">{sub.nextBillingDate || '—'}</p>
+                        </div>
+                        <button
+                          onClick={() => void handleRestoreDeleted(sub.id)}
+                          disabled={recycleBusy}
+                          className="text-primary text-xs font-bold px-3 py-1.5 rounded-lg hover:bg-surface-container-high transition-colors disabled:opacity-40 shrink-0"
+                        >
+                          {t('recycle.restore')}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    onClick={handlePurgeSelected}
+                    disabled={selectedDeleted.length === 0 || recycleBusy}
+                    className="w-full py-3 rounded-xl bg-red-500 text-white font-bold text-sm active:scale-[0.98] transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                  >
+                    <Trash2 size={16} />
+                    {t('recycle.purgeNow')} ({selectedDeleted.length})
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        );
+
       case 'help':
         return (
           <div>
@@ -806,19 +912,8 @@ export default function Settings() {
                 <p className="text-xs text-on-surface-variant font-medium">v{appVersion}</p>
                 <p className="text-xs text-on-surface-variant text-center max-w-xs">{t('settings.aboutDesc')}</p>
               </div>
-              <a
-                href={`mailto:${CONTACT_EMAIL}`}
-                className="flex items-center justify-between bg-surface-container-low rounded-xl p-3 hover:bg-surface-container transition-colors"
-              >
-                <span className="flex items-center gap-3 text-sm font-semibold text-on-surface">
-                  <Mail size={16} className="text-on-surface-variant" />
-                  {t('settings.contactUs')}
-                </span>
-                <span className="text-xs text-primary font-medium">{CONTACT_EMAIL}</span>
-              </a>
-
-              {/* V1.3.9：用户协议与隐私政策（应用内整页查看，与登录页一致） */}
-              <div className="bg-surface-container-low rounded-xl divide-y divide-outline-variant/10 overflow-hidden">
+              {/* V1.4.0：协议在上、联络我们在下，三行同框无分隔线 */}
+              <div className="bg-surface-container-low rounded-xl overflow-hidden">
                 <button
                   onClick={() => setLegalKind('agreement')}
                   className="w-full flex items-center justify-between p-3 hover:bg-surface-container transition-colors"
@@ -839,6 +934,16 @@ export default function Settings() {
                   </span>
                   <ChevronRight size={16} className="text-outline-variant" />
                 </button>
+                <a
+                  href={`mailto:${CONTACT_EMAIL}`}
+                  className="w-full flex items-center justify-between p-3 hover:bg-surface-container transition-colors"
+                >
+                  <span className="flex items-center gap-3 text-sm font-semibold text-on-surface">
+                    <Mail size={16} className="text-on-surface-variant" />
+                    {t('settings.contactUs')}
+                  </span>
+                  <span className="text-xs text-primary font-medium">{CONTACT_EMAIL}</span>
+                </a>
               </div>
             </div>
           </div>
@@ -884,6 +989,11 @@ export default function Settings() {
                   value={syncing ? t('settings.syncing') : formatLastSync()}
                   onClick={() => void handleCloudSync()}
                 />
+                <SettingsItem
+                  icon={<Trash2 size={18} />}
+                  label={t('settings.recycleBin')}
+                  onClick={() => { setView('recycle'); void loadDeletedSubs(); }}
+                />
               </SettingsGroup>
 
               <SettingsGroup title={t('settings.general')}>
@@ -907,11 +1017,50 @@ export default function Settings() {
               </SettingsGroup>
             </div>
 
-            {/* Sign Out — 扁平文字按钮 */}
-            <button onClick={logout} className="w-full py-4 flex items-center justify-center gap-2 text-red-600 font-bold hover:bg-red-50 rounded-2xl transition-colors active:scale-[0.99]">
+            {/* Sign Out — 红色底框 + 二次确认（V1.4.0） */}
+            <button onClick={() => setShowLogoutConfirm(true)} className="w-full py-4 flex items-center justify-center gap-2 bg-red-500/10 text-red-600 font-bold rounded-2xl transition-colors active:scale-[0.99] hover:bg-red-500/15">
               <LogOut size={20} />
               {t('settings.signOut')}
             </button>
+            <AnimatePresence>
+              {showLogoutConfirm && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center px-8"
+                  onClick={() => setShowLogoutConfirm(false)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.92, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={{ scale: 0.95, opacity: 0 }}
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-surface rounded-2xl p-6 w-full max-w-xs text-center shadow-2xl"
+                  >
+                    <div className="w-12 h-12 mx-auto rounded-full bg-red-500/10 flex items-center justify-center text-red-600">
+                      <LogOut size={22} />
+                    </div>
+                    <h3 className="text-base font-bold text-on-surface mt-3">{t('settings.logoutConfirmTitle')}</h3>
+                    <p className="text-sm text-on-surface-variant mt-1">{user?.email}</p>
+                    <div className="flex gap-3 mt-5">
+                      <button
+                        onClick={() => setShowLogoutConfirm(false)}
+                        className="flex-1 py-2.5 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-sm active:scale-95 transition-all"
+                      >
+                        {t('settings.cancelLogout')}
+                      </button>
+                      <button
+                        onClick={() => { setShowLogoutConfirm(false); logout(); }}
+                        className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-bold text-sm active:scale-95 transition-all"
+                      >
+                        {t('settings.continueLogout')}
+                      </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* 版本号跟随 package.json 的 version 字段 */}
             <p className="text-center text-[10px] text-on-surface-variant font-medium opacity-40">

@@ -4,7 +4,7 @@ export interface Subscription {
   icon: string;
   price: number;
   currency: string;
-  billingCycle?: 'monthly' | 'annually';
+  billingCycle?: 'monthly' | 'quarterly' | 'annually' | 'trial';
   nextBillingDate: string;
   // V1.3.9：订阅开始时间——周期由「订阅时间 → 下一个账单日」的间隔推导
   startDate?: string;

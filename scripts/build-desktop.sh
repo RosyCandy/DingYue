@@ -17,17 +17,20 @@ VITE_API_BASE_URL="https://ngaasiu.studio/api" npm run build
 echo "==> 1.5/3 复制界面资源到打包目录（dist 是 electron-builder 保留目录名，需换名打包）"
 rm -rf desktop-files && mkdir -p desktop-files && cp -a dist desktop-files/dist
 
-echo "==> 2/3 electron-builder（mac arm64 dmg + win x64 NSIS）"
-npx electron-builder --mac dmg --arm64 --config electron-builder.json
-npx electron-builder --win nsis --x64 --config electron-builder.json
+echo "==> 2/3 electron-builder（V1.4.0 起：mac arm64+x64 dmg、win x64+arm64 NSIS）"
+npx electron-builder --mac dmg --arm64 --x64 --config electron-builder.json
+npx electron-builder --win nsis --x64 --arm64 --config electron-builder.json
 
 echo "==> 3/3 复制到桌面（保留所有历史版本，不覆盖不删除）"
 OUT_DIR="$HOME/Desktop/DingYue-桌面版"
 mkdir -p "$OUT_DIR"
-cp -n desktop-dist/DingYue-${VERSION}-mac.dmg "$OUT_DIR/" 2>/dev/null || \
-  cp desktop-dist/DingYue-${VERSION}-mac.dmg "$OUT_DIR/DingYue-${VERSION}-mac.dmg"
-cp -n desktop-dist/DingYue-${VERSION}-setup.exe "$OUT_DIR/" 2>/dev/null || \
-  cp desktop-dist/DingYue-${VERSION}-setup.exe "$OUT_DIR/DingYue-${VERSION}-setup.exe"
+for f in \
+  DingYue-${VERSION}-macos-arm64.dmg \
+  DingYue-${VERSION}-macos-x64.dmg \
+  DingYue-${VERSION}-windows-x64.exe \
+  DingYue-${VERSION}-windows-arm64.exe; do
+  cp "desktop-dist/$f" "$OUT_DIR/$f"
+done
 
 echo "==> 当前桌面上的全部历史版本："
 ls -lht "$OUT_DIR/"

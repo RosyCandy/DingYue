@@ -176,8 +176,9 @@ export default function Dashboard({ onNavigate }: { onNavigate?: (tab: 'dashboar
     container.scrollTop = Math.max(0, today.offsetTop - 8);
   }, [timeline]);
 
-  const activePaidSubs = subscriptions.filter(s => s.status !== 'trial');
-  const trialSubs = subscriptions.filter(s => s.status === 'trial');
+  // V1.4.0：免费试用按账单周期（trial）或历史状态（trial）识别
+  const activePaidSubs = subscriptions.filter(s => s.status !== 'trial' && s.billingCycle !== 'trial');
+  const trialSubs = subscriptions.filter(s => s.status === 'trial' || s.billingCycle === 'trial');
 
   const filteredCurrencies = ACTIVE_CURRENCIES.filter((c) => {
     const query = currencySearch.trim().toLowerCase();

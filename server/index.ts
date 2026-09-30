@@ -171,7 +171,7 @@ type SubscriptionRow = {
   icon: string | null;
   price: number;
   currency: string;
-  billing_cycle: 'monthly' | 'annually';
+  billing_cycle: BillingCycle;
   next_billing_date: string | null;
   start_date?: string | null;
   category: string | null;
@@ -229,10 +229,18 @@ const parsePrice = (value: unknown): number => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
-const normalizeBillingCycle = (value: unknown): 'monthly' | 'annually' => {
+type BillingCycle = 'monthly' | 'quarterly' | 'annually' | 'trial';
+
+const normalizeBillingCycle = (value: unknown): BillingCycle => {
   const normalized = String(value ?? '').toLowerCase();
   if (normalized === 'annually' || normalized === 'annual' || normalized === 'yearly') {
     return 'annually';
+  }
+  if (normalized === 'quarterly' || normalized === 'quarter') {
+    return 'quarterly';
+  }
+  if (normalized === 'trial' || normalized === 'free') {
+    return 'trial';
   }
   return 'monthly';
 };
@@ -248,30 +256,16 @@ const parseBoolean = (value: unknown, defaultValue = false): boolean => {
   return defaultValue;
 };
 
-// V1.3.9：周期改为「订阅时间 → 下一个账单日」的间隔推导（天数），
-// 支持月付/季付/年付乃至任意周期；两个日期缺失或间隔不足一周时
-// 回退到旧的 billing_cycle 口径（兼容存量数据）
-const subscriptionCycleDays = (sub: Pick<SubscriptionRow, 'start_date' | 'next_billing_date' | 'billing_cycle'>): number | null => {
-  if (sub.start_date && sub.next_billing_date) {
-    const start = new Date(sub.start_date);
-    const next = new Date(sub.next_billing_date);
-    if (!Number.isNaN(start.getTime()) && !Number.isNaN(next.getTime())) {
-      const days = Math.round((next.getTime() - start.getTime()) / 86400000);
-      if (days >= 7) return days;
-    }
-  }
-  return null;
-};
-
-const toMonthlyAmount = (subscription: Pick<SubscriptionRow, 'price' | 'billing_cycle' | 'start_date' | 'next_billing_date'>): number => {
+// V1.4.0：账单周期回到显式选择（月付/季度付/年付/免费试用），
+// 月均金额按周期折算；免费试用不计入支出
+const toMonthlyAmount = (subscription: Pick<SubscriptionRow, 'price' | 'billing_cycle'>): number => {
   const price = parsePrice(subscription.price);
-  const cycleDays = subscriptionCycleDays(subscription);
-  if (cycleDays) {
-    return (price * 30.4375) / cycleDays;
+  switch (subscription.billing_cycle) {
+    case 'annually': return price / 12;
+    case 'quarterly': return price / 3;
+    case 'trial': return 0;
+    default: return price;
   }
-  return subscription.billing_cycle === 'annually'
-    ? price / 12
-    : price;
 };
 
 // ─────────────────────────────────────────────
@@ -499,6 +493,14 @@ async function ensureDatabaseSchema() {
   if (!subscriptionColumnNames.has('start_date')) {
     await pool.execute('ALTER TABLE subscriptions ADD COLUMN start_date DATE NULL AFTER next_billing_date');
   }
+  // V1.4.0：回收站——软删除 + 30 天后永久清除；账单周期加入季度付/免费试用
+  if (!subscriptionColumnNames.has('deleted_at')) {
+    await pool.execute('ALTER TABLE subscriptions ADD COLUMN deleted_at DATETIME NULL AFTER status');
+  }
+  await pool.execute(`
+    ALTER TABLE subscriptions
+      MODIFY billing_cycle ENUM('monthly', 'quarterly', 'annually', 'trial') NOT NULL DEFAULT 'monthly'
+  `);
 
   const [subscriptionIndexes]: any = await pool.query(
     `SHOW INDEX FROM subscriptions WHERE Key_name = 'idx_subscriptions_user_id'`
@@ -711,7 +713,18 @@ async function ensureDatabaseSchema() {
 
 const fetchUserSubscriptions = async (userId: number): Promise<SubscriptionRow[]> => {
   const [rows]: any = await pool.query(
-    'SELECT * FROM subscriptions WHERE user_id = ? ORDER BY created_at DESC',
+    'SELECT * FROM subscriptions WHERE user_id = ? AND deleted_at IS NULL ORDER BY created_at DESC',
+    [userId]
+  );
+  return (Array.isArray(rows) ? rows : []) as SubscriptionRow[];
+};
+
+// 回收站：已软删除的订阅（30 天内可恢复，过期由定时任务永久清除）
+const fetchDeletedSubscriptions = async (userId: number): Promise<SubscriptionRow[]> => {
+  const [rows]: any = await pool.query(
+    `SELECT * FROM subscriptions
+     WHERE user_id = ? AND deleted_at IS NOT NULL
+     ORDER BY deleted_at DESC`,
     [userId]
   );
   return (Array.isArray(rows) ? rows : []) as SubscriptionRow[];
@@ -844,7 +857,9 @@ const buildStatsOverview = (subscriptions: SubscriptionRow[], ownerEmail = '') =
     const billingMonth = sub.next_billing_date && !Number.isNaN(new Date(sub.next_billing_date).getTime())
       ? new Date(sub.next_billing_date).getMonth()
       : currentMonthIndex;
-    trend[billingMonth].value += parsePrice(sub.price) * currencyToUsdRate(sub.currency);
+    if (sub.billing_cycle !== 'trial') {
+      trend[billingMonth].value += parsePrice(sub.price) * currencyToUsdRate(sub.currency);
+    }
   });
 
   const trendData = trend.map((item) => ({
@@ -956,8 +971,73 @@ const upsertNotification = async ({
   );
 };
 
+// 消息中心按用户界面语言生成文案（V1.4.0：此前固定英文）
+const NOTIFICATION_TEXT: Record<UserLanguage, {
+  title: (name: string) => string;
+  dueToday: (name: string) => string;
+  renewsIn: (name: string, days: number) => string;
+  action: string;
+  trialTitle: (name: string) => string;
+  trialMessage: string;
+}> = {
+  'English': {
+    title: (n) => `${n} billing reminder`,
+    dueToday: (n) => `${n} is due today. Please review your payment method.`,
+    renewsIn: (n, d) => `${n} renews in ${d} day(s).`,
+    action: 'Renew or Cancel',
+    trialTitle: (n) => `${n} trial ending`,
+    trialMessage: 'Free trial ending soon. Cancel to avoid charges.'
+  },
+  '简体中文': {
+    title: (n) => `${n} 即将到期`,
+    dueToday: (n) => `${n} 今天到期，请检查你的支付方式。`,
+    renewsIn: (n, d) => `${n} 将在 ${d} 天后到期续费。`,
+    action: '去续费或取消',
+    trialTitle: (n) => `${n} 免费试用即将结束`,
+    trialMessage: '免费试用即将结束，记得在扣费前取消。'
+  },
+  '繁體中文': {
+    title: (n) => `${n} 即將到期`,
+    dueToday: (n) => `${n} 今天到期，請檢查你的付款方式。`,
+    renewsIn: (n, d) => `${n} 將在 ${d} 天後到期續費。`,
+    action: '去續費或取消',
+    trialTitle: (n) => `${n} 免費試用即將結束`,
+    trialMessage: '免費試用即將結束，記得在扣費前取消。'
+  },
+  'Latin': {
+    title: (n) => `${n} mox solvetur`,
+    dueToday: (n) => `${n} hodie solvetur. Modum solvendi inspice.`,
+    renewsIn: (n, d) => `${n} post ${d} dies solvetur.`,
+    action: 'Renova aut Cancella',
+    trialTitle: (n) => `${n} liberum tempus finitur`,
+    trialMessage: 'Liberum tempus finitur. Cancelea ante solutionem.'
+  },
+  '한국어': {
+    title: (n) => `${n} 결제 임박`,
+    dueToday: (n) => `${n} 오늘 결제일입니다. 결제 수단을 확인하세요.`,
+    renewsIn: (n, d) => `${n} ${d}일 후 갱신됩니다.`,
+    action: '갱신 또는 취소',
+    trialTitle: (n) => `${n} 무료 체험이 곧 끝납니다`,
+    trialMessage: '무료 체험이 곧 끝납니다. 결제 전에 취소하세요.'
+  }
+};
+
+const getUserLanguage = async (userId: number): Promise<UserLanguage> => {
+  try {
+    const [rows]: any = await pool.query(
+      'SELECT language FROM user_settings WHERE user_id = ? LIMIT 1',
+      [userId]
+    );
+    const lang = rows?.[0]?.language as UserLanguage;
+    return NOTIFICATION_TEXT[lang] ? lang : 'English';
+  } catch {
+    return 'English';
+  }
+};
+
 const syncSubscriptionNotifications = async (userId: number) => {
   const subscriptions = await fetchUserSubscriptions(userId);
+  const text = NOTIFICATION_TEXT[await getUserLanguage(userId)] || NOTIFICATION_TEXT['English'];
 
   for (const sub of subscriptions) {
     const daysLeft = computeDaysUntil(sub.next_billing_date);
@@ -965,10 +1045,10 @@ const syncSubscriptionNotifications = async (userId: number) => {
 
     const severity: NotificationSeverity = daysLeft <= 1 ? 'critical' : daysLeft <= 3 ? 'warning' : 'info';
     const billingKey = `billing:${sub.id}:${sub.next_billing_date || 'na'}`;
-    const billingTitle = `${sub.name} billing reminder`;
+    const billingTitle = text.title(sub.name);
     const billingMessage = daysLeft <= 0
-      ? `${sub.name} is due today. Please review your payment method.`
-      : `${sub.name} renews in ${daysLeft} day(s).`;
+      ? text.dueToday(sub.name)
+      : text.renewsIn(sub.name, daysLeft);
 
     await upsertNotification({
       userId,
@@ -978,20 +1058,20 @@ const syncSubscriptionNotifications = async (userId: number) => {
       message: billingMessage,
       severity,
       relatedSubscriptionId: sub.id,
-      actionText: 'Renew or Cancel',
+      actionText: text.action,
       actionTarget: `/subscriptions/${sub.id}`
     });
 
-    if (sub.status === 'trial' && daysLeft <= 3) {
+    if ((sub.status === 'trial' || sub.billing_cycle === 'trial') && daysLeft <= 3) {
       await upsertNotification({
         userId,
         notificationKey: `trial:${sub.id}:${sub.next_billing_date || 'na'}`,
         type: 'trial_ending',
-        title: `${sub.name} trial ending`,
-        message: 'Free trial ending soon. Cancel to avoid charges.',
+        title: text.trialTitle(sub.name),
+        message: text.trialMessage,
         severity: 'warning',
         relatedSubscriptionId: sub.id,
-        actionText: 'Renew or Cancel',
+        actionText: text.action,
         actionTarget: `/subscriptions/${sub.id}`
       });
     }
@@ -1220,6 +1300,10 @@ const runBillingReminders = async (): Promise<number> => {
 // 每小时整点后跑一次扫描（提醒日期由 SQL 精确匹配，防重表保证不重复发送）
 const scheduleBillingReminders = () => {
   const tick = () => {
+    // 回收站清理：软删除超过 30 天的订阅永久移除
+    pool.execute('DELETE FROM subscriptions WHERE deleted_at IS NOT NULL AND deleted_at < NOW() - INTERVAL 30 DAY')
+      .then(([result]: any) => { if (result?.affectedRows) console.log(`Recycle bin purged: ${result.affectedRows}`); })
+      .catch((e: any) => console.error('Recycle bin purge failed:', e.message));
     void runBillingReminders()
       .then((sent) => { if (sent > 0) console.log(`Billing reminders sent: ${sent}`); })
       .catch((e) => console.error('Billing reminder scan failed:', e.message));
@@ -2294,17 +2378,69 @@ app.put('/api/subscriptions/:id', authRequired, async (req: AuthenticatedRequest
 });
 
 // 4. DELETE /api/subscriptions/:id — 删除订阅
+// V1.4.0：删除改为软删除进回收站，30 天后由定时任务永久清除
 app.delete('/api/subscriptions/:id', authRequired, async (req: AuthenticatedRequest, res) => {
   try {
     const userId = req.user!.userId;
     const { id } = req.params;
-    const [result]: any = await pool.execute('DELETE FROM subscriptions WHERE id = ? AND user_id = ?', [id, userId]);
+    const [result]: any = await pool.execute(
+      'UPDATE subscriptions SET deleted_at = NOW() WHERE id = ? AND user_id = ? AND deleted_at IS NULL',
+      [id, userId]
+    );
     if (!result?.affectedRows) {
       return res.status(404).json({ error: 'Subscription not found' });
     }
     res.status(204).send();
   } catch (error: any) {
     console.error('Error deleting subscription:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 回收站列表
+app.get('/api/subscriptions-deleted', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    res.json(await fetchDeletedSubscriptions(req.user!.userId));
+  } catch (error: any) {
+    console.error('Error fetching deleted subscriptions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 从回收站恢复
+app.post('/api/subscriptions/:id/restore', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const { id } = req.params;
+    const [result]: any = await pool.execute(
+      'UPDATE subscriptions SET deleted_at = NULL WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL',
+      [id, userId]
+    );
+    if (!result?.affectedRows) {
+      return res.status(404).json({ error: 'Subscription not found' });
+    }
+    res.status(204).send();
+  } catch (error: any) {
+    console.error('Error restoring subscription:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// 立即永久删除
+app.delete('/api/subscriptions/:id/purge', authRequired, async (req: AuthenticatedRequest, res) => {
+  try {
+    const userId = req.user!.userId;
+    const { id } = req.params;
+    const [result]: any = await pool.execute(
+      'DELETE FROM subscriptions WHERE id = ? AND user_id = ? AND deleted_at IS NOT NULL',
+      [id, userId]
+    );
+    if (!result?.affectedRows) {
+      return res.status(404).json({ error: 'Subscription not found' });
+    }
+    res.status(204).send();
+  } catch (error: any) {
+    console.error('Error purging subscription:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -2564,13 +2700,9 @@ const expandBillingDates = (
 
   // V1.3.9：周期由「订阅时间 → 下一个账单日」推导；间隔接近整月（±3 天）时
   // 仍按月推进以保持账单日（如每月 31 日），否则按实际天数推进（季付/任意周期）
-  const cycleDays = subscriptionCycleDays(sub);
-  const stepMonths = cycleDays
-    ? (Math.abs(Math.round(cycleDays / 30.4375) * 30.4375 - cycleDays) <= 3
-        ? Math.max(1, Math.round(cycleDays / 30.4375))
-        : 0)
-    : stepMonthsBase;
-  const stepDays = stepMonths === 0 ? (cycleDays || 30) : 0;
+  const cycleStep: Record<BillingCycle, number> = { monthly: 1, quarterly: 3, annually: 12, trial: 1 };
+  const stepMonths = cycleStep[sub.billing_cycle] || stepMonthsBase;
+  const stepDays = 0;
   const dayOfMonth = anchor.getDate();
 
   // 以「年+月」偏移生成与锚点同日的账单日，避免 setMonth 溢出（1/31 + 1月 → 3/3）
@@ -3467,20 +3599,22 @@ app.get('/api/help/articles', authRequired, async (_req: AuthenticatedRequest, r
           '2. Tap the dashed icon at the top left of the form to choose an icon: search online (iTunes catalog), pick from popular apps, or upload your own image.',
           '3. Fill in the subscription name (e.g. Spotify Premium), pick a category, and optionally add a region such as "US" or "CN".',
           '4. Choose a source (Apple App Store / Google Play / Direct Billing) and the account email the subscription belongs to — subscriptions can use any email, and the Statistics page can compare accounts.',
-          '5. Enter the amount and currency. 160+ currencies are supported; the currency defaults to your Home display currency. Toggle "Free subscription" for free plans — they are excluded from spending totals but still get expiry reminders.',
-          '6. Set the subscription start date (when you actually paid/subscribed) and the next billing date. The billing cycle is derived automatically from the interval between these two dates — monthly, quarterly, annual or any custom cycle works, so there is no cycle dropdown to worry about.',
-          '7. Tap Save. The subscription appears in the list, the Dashboard totals and the timeline immediately.',
-          '8. To edit: go to the Subscriptions page, tap a subscription card, change any field and save. To delete: open the subscription and use the delete option at the bottom.'
+          '5. Pick the billing cycle: monthly, quarterly, annually or free trial (trial subscriptions are excluded from spending totals but still get expiry reminders).',
+          '6. Enter the amount and currency — 160+ currencies are supported, defaulting to your Home display currency.',
+          '7. Set the subscription start date (when you actually subscribed) and the next billing date — the timeline uses both dates.',
+          '8. Tap Save. The subscription appears in the list, the Dashboard totals and the timeline immediately.',
+          '9. To edit: go to the Subscriptions page and tap a subscription card. To delete: open it and use the red delete button — deleted subscriptions stay in Settings → Recycle Bin for 30 days before being permanently removed.',
         ],
         zh: [
           '1. 在首页、订阅页或统计页点击右下角蓝色「+」按钮，打开添加订阅表单。',
           '2. 点击表单左上角的虚线图标选择图标：可在线搜索（iTunes 图标库）、从热门应用中挑选，或上传本地图片。',
           '3. 填写订阅名称（如 Spotify Premium），选择分类，可选填地区（如 国区、美区）。',
           '4. 选择来源（Apple 应用商店 / Google Play / 官网直付）和该订阅所属的账户邮箱——订阅可以填任何邮箱，统计页能按账户对比。',
-          '5. 填写金额和币种，支持 160+ 种货币，默认跟随首页展示货币；免费订阅打开「免费订阅」开关即可——不计入支出统计，但保留到期提醒。',
-          '6. 设置订阅时间（你实际付款/订阅的那天）和下一个账单日。周期由这两个日期的间隔自动推导——月付、季付、年付乃至任意周期都可以，不需要选频率。',
-          '7. 点击保存。订阅会立即出现在订阅列表、首页合计和时间线里。',
-          '8. 编辑：进入订阅页点击订阅卡片，修改任意字段后保存。删除：打开该订阅，使用底部删除按钮。'
+          '5. 选择账单周期：月付、季度付、年付或免费试用（免费试用不计入支出统计，但保留到期提醒）。',
+          '6. 填写金额和币种，支持 160+ 种货币，默认跟随首页展示货币。',
+          '7. 设置订阅时间（你实际付款/订阅的那天）和下一个账单日——时间线会同时标注这两个日期。',
+          '8. 点击保存。订阅会立即出现在订阅列表、首页合计和时间线里。',
+          '9. 编辑：进入订阅页点击订阅卡片。删除：打开该订阅使用底部红色删除按钮——删除的订阅会进入 设置 → 回收站，30 天后自动永久清除，期间可恢复。'
         ]
       }
     },

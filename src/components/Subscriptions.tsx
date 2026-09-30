@@ -32,12 +32,18 @@ const translateCategoryName = (name: string, t: (k: string) => string): string =
   return key ? t(key) : name;
 };
 
+// 默认分类（不可删除，但参与筛选与管理列表展示）
+const DEFAULT_CATEGORY_COLORS = ['#0054cd', '#4c4aca', '#894d00', '#2e7d32', '#ec4899', '#0ea5e9', '#6366f1', '#16a34a', '#d97706'];
+
 export default function Subscriptions() {
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showCycleDropdown, setShowCycleDropdown] = useState(false);
+  // V1.4.0：账单周期真实筛选 + 分类点选筛选（默认分类一并纳入管理列表）
+  const [cycleFilter, setCycleFilter] = useState<'all' | 'monthly' | 'quarterly' | 'annually' | 'trial'>('all');
+  const [categoryFilter, setCategoryFilter] = useState<string>('all');
   const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
@@ -154,10 +160,12 @@ export default function Subscriptions() {
       (statusFilter === 'urgent' && sub.status === 'urgent') ||
       (statusFilter === 'soon' && sub.status === 'soon') ||
       (statusFilter === 'expired' && sub.status === 'expired');
+    const matchesCategory = categoryFilter === 'all' || sub.category === categoryFilter;
+    const matchesCycle = cycleFilter === 'all' || (sub.billingCycle || 'monthly') === cycleFilter;
     // 未填写账户的订阅归入登录邮箱账户
     const subAccount = sub.account || defaultAccount;
     const matchesAccount = account === '__all__' || subAccount === account;
-    return matchesSearch && matchesStatus && matchesAccount;
+    return matchesSearch && matchesStatus && matchesAccount && matchesCategory && matchesCycle;
   });
 
   const accountOptions = Array.from(new Set([
@@ -271,25 +279,38 @@ export default function Subscriptions() {
             {showCategoryDropdown && (
               <div className="absolute top-full left-0 mt-2 w-56 bg-surface-container-lowest border border-outline-variant/10 rounded-xl shadow-xl z-50 p-2">
                 <div className="max-h-48 overflow-y-auto">
-                  {categories.map((category) => (
-                    <div key={category.id} className="flex items-center justify-between px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm">
+                  {[
+                    ...Object.keys(CATEGORY_I18N).map((name, i) => ({
+                      id: `default:${name}`, name, color: DEFAULT_CATEGORY_COLORS[i % DEFAULT_CATEGORY_COLORS.length], isDefault: true
+                    })),
+                    ...categories.map((c) => ({ id: `custom:${c.id}`, name: c.name, color: c.color, isDefault: false }))
+                  ].map((category) => (
+                    <div
+                      key={category.id}
+                      onClick={() => { setCategoryFilter(categoryFilter === category.name ? 'all' : category.name); setShowCategoryDropdown(false); }}
+                      className={cn(
+                        'flex items-center justify-between px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm cursor-pointer',
+                        categoryFilter === category.name && 'bg-primary/10'
+                      )}
+                    >
                       <span className="flex items-center gap-2 truncate">
                         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: category.color }} />
-                        <span className="truncate">{category.name}</span>
+                        <span className="truncate">{translateCategoryName(category.name, t)}</span>
                       </span>
-                      <button
-                        onClick={() => void handleDeleteCategory(category.id)}
-                        disabled={categoryBusy}
-                        className="text-on-surface-variant hover:text-red-500 disabled:opacity-40 shrink-0"
-                        aria-label={`${t('settings.deleteAccount')}`}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {categoryFilter === category.name ? (
+                        <Check size={14} className="text-primary shrink-0" />
+                      ) : !category.isDefault ? (
+                        <button
+                          onClick={(e) => { e.stopPropagation(); void handleDeleteCategory(Number(category.id)); }}
+                          disabled={categoryBusy}
+                          className="text-on-surface-variant hover:text-red-500 disabled:opacity-40 shrink-0"
+                          aria-label={t('subs.delete')}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      ) : null}
                     </div>
                   ))}
-                  {categories.length === 0 && (
-                    <p className="px-3 py-2 text-xs text-on-surface-variant">{t('settings.noData')}</p>
-                  )}
                 </div>
                 <div className="border-t border-outline-variant/10 mt-1 pt-2 flex items-center gap-1 px-1">
                   <input
@@ -320,14 +341,29 @@ export default function Subscriptions() {
             />
             {showCycleDropdown && (
               <div className="absolute top-full left-0 mt-2 w-40 bg-surface-container-lowest border border-outline-variant/10 rounded-xl shadow-xl z-50 p-2">
-                <button className="w-full text-left px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm">{t('subs.monthly')}</button>
-                <button className="w-full text-left px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm">{t('subs.annual')}</button>
-                <button className="w-full text-left px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm">{t('subs.lifetime')}</button>
+                {([
+                  ['all', t('subs.all')],
+                  ['monthly', t('add.cycleMonthly')],
+                  ['quarterly', t('add.cycleQuarterly')],
+                  ['annually', t('add.cycleAnnually')],
+                  ['trial', t('add.cycleTrial')]
+                ] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    onClick={() => { setCycleFilter(value); setShowCycleDropdown(false); }}
+                    className={cn(
+                      'w-full text-left px-3 py-2 hover:bg-surface-container-low rounded-lg text-sm',
+                      cycleFilter === value && 'text-primary font-bold'
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
             )}
           </div>
 
-          <button onClick={() => { setStatusFilter('all'); setSearchQuery(''); }} className="flex items-center gap-1.5 px-4 py-2.5 ml-auto text-primary text-xs font-bold whitespace-nowrap">
+          <button onClick={() => { setStatusFilter('all'); setSearchQuery(''); setSelectedAccount('__all__'); setCategoryFilter('all'); setCycleFilter('all'); }} className="flex items-center gap-1.5 px-4 py-2.5 ml-auto text-primary text-xs font-bold whitespace-nowrap">
             <RefreshCw size={14} />
             {t('subs.reset')}
           </button>

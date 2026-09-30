@@ -228,11 +228,12 @@ const parseApiError = async (response: Response): Promise<string> => {
   }
 };
 
-const toBillingCycle = (value: unknown): 'monthly' | 'annually' => {
+const toBillingCycle = (value: unknown): 'monthly' | 'quarterly' | 'annually' | 'trial' => {
   const normalized = String(value ?? '').toLowerCase();
-  return normalized === 'annually' || normalized === 'annual' || normalized === 'yearly'
-    ? 'annually'
-    : 'monthly';
+  if (normalized === 'annually' || normalized === 'annual' || normalized === 'yearly') return 'annually';
+  if (normalized === 'quarterly' || normalized === 'quarter') return 'quarterly';
+  if (normalized === 'trial' || normalized === 'free') return 'trial';
+  return 'monthly';
 };
 
 const calculateDaysLeft = (dateText?: string | null): number | undefined => {
@@ -748,6 +749,32 @@ export const api = {
     });
     if (!response.ok) throw new Error(await parseApiError(response));
     return response.json();
+  },
+
+  async getDeletedSubscriptions(): Promise<Subscription[]> {
+    const response = await fetch(`${API_URL}/subscriptions-deleted`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+    const data = await response.json();
+    return (Array.isArray(data) ? data : []).map(normalizeSubscription);
+  },
+
+  async restoreSubscription(id: string): Promise<void> {
+    const response = await fetch(`${API_URL}/subscriptions/${id}/restore`, {
+      method: 'POST',
+      headers: getAuthHeaders(true),
+      body: JSON.stringify({}),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
+  },
+
+  async purgeSubscription(id: string): Promise<void> {
+    const response = await fetch(`${API_URL}/subscriptions/${id}/purge`, {
+      method: 'DELETE',
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) throw new Error(await parseApiError(response));
   },
 
   async getHelpArticles(): Promise<HelpArticle[]> {

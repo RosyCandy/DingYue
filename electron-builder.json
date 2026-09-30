@@ -16,11 +16,12 @@
       {
         "target": "nsis",
         "arch": [
-          "x64"
+          "x64",
+          "arm64"
         ]
       }
     ],
-    "artifactName": "DingYue-${version}-setup.${ext}"
+    "artifactName": "DingYue-${version}-windows-${arch}.${ext}"
   },
   "nsis": {
     "oneClick": false,
@@ -32,12 +33,13 @@
       {
         "target": "dmg",
         "arch": [
-          "arm64"
+          "arm64",
+          "x64"
         ]
       }
     ],
     "identity": null,
-    "artifactName": "DingYue-${version}-mac.${ext}"
+    "artifactName": "DingYue-${version}-macos-${arch}.${ext}"
   },
   "linux": {
     "target": [

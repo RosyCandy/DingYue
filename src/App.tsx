@@ -308,13 +308,15 @@ export default function App() {
         </AnimatePresence>
       </main>
 
-      {/* FAB */}
-      <button 
-        onClick={() => setShowAddModal(true)}
-        className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-6 w-14 h-14 rounded-full bg-gradient-to-br from-primary to-primary-container text-white shadow-2xl flex items-center justify-center hover:opacity-90 active:scale-90 transition-all z-40"
-      >
-        <Plus size={28} />
-      </button>
+      {/* FAB — V1.4.0：只有订阅页显示添加入口 */}
+      {activeTab === 'subscriptions' && (
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] right-6 w-14 h-14 rounded-full bg-gradient-to-br from-primary to-primary-container text-white shadow-2xl flex items-center justify-center hover:opacity-90 active:scale-90 transition-all z-40"
+        >
+          <Plus size={28} />
+        </button>
+      )}
 
       {/* Bottom Navigation */}
       <nav className="app-bottom-nav fixed bottom-0 left-0 w-full z-50 flex justify-around items-center px-4 pt-2 pb-8 bg-surface border-t border-outline-variant/10">

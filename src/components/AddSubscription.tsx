@@ -6,6 +6,7 @@ import { useI18n } from '../lib/i18n';
 import { cn } from '../lib/utils';
 import { useBackHandler } from '../lib/backButton';
 import { api } from '../lib/api';
+import { Trash2 } from 'lucide-react';
 import { ACTIVE_CURRENCIES, getCurrencySymbol } from '../lib/currencies';
 import { Subscription } from '../constants';
 
@@ -32,8 +33,10 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
   const [currency, setCurrency] = useState(
     initialData?.currency || localStorage.getItem('display_currency') || 'USD'
   );
-  // 免费订阅：金额置 0，但仍保留续期日期与到期提醒
-  const [isFree, setIsFree] = useState(Number(initialData?.price) === 0 && Boolean(initialData));
+  // V1.4.0：账单周期显式下拉（月付/季度付/年付/免费试用），替代原「免费订阅」开关
+  const [cycle, setCycle] = useState<'monthly' | 'quarterly' | 'annually' | 'trial'>(
+    initialData?.billingCycle || 'monthly'
+  );
   const [customCategories, setCustomCategories] = useState<Array<{ id: number; name: string }>>([]);
   // V1.3.9：频率下拉改为「订阅时间」——周期 = 订阅时间 → 下一个账单日的间隔，
   // 月付/季付/年付乃至任意周期都自然支持
@@ -49,6 +52,25 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
       : ''
   );
   const [selectedIcon, setSelectedIcon] = useState<string | null>(initialData?.icon || null);
+  // V1.4.0：删除订阅（软删除进回收站，二次确认）
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDelete = async () => {
+    if (!initialData?.id) return;
+    try {
+      setDeleting(true);
+      await api.deleteSubscription(initialData.id);
+      setConfirmingDelete(false);
+      onSuccess?.();
+      onClose();
+    } catch (error) {
+      console.error('Failed to delete subscription:', error);
+      alert(t('subs.deleteFailed') || 'Delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   useEffect(() => {
     void api.getCustomCategories()
@@ -64,7 +86,7 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
       }
 
       setLoading(true);
-      const normalizedPrice = isFree ? 0 : Number(price);
+      const normalizedPrice = cycle === 'trial' ? 0 : Number(price);
       const subData: Omit<Subscription, 'id'> = {
         name,
         category,
@@ -72,10 +94,11 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
         account,
         price: Number.isFinite(normalizedPrice) ? normalizedPrice : 0,
         currency,
+        billingCycle: cycle,
         nextBillingDate: nextBillingDate || '',
         startDate,
         icon: selectedIcon || '',
-        status: 'normal'
+        status: cycle === 'trial' ? 'trial' : 'normal'
       };
       if (initialData?.id) {
         await api.updateSubscription(initialData.id, subData);
@@ -228,30 +251,27 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                   </div>
                 </div>
 
-                {/* 免费订阅开关：金额置 0，续期日期与到期提醒仍然生效 */}
-                <label className="flex items-center justify-between cursor-pointer pt-1">
-                  <span className="text-sm font-semibold text-on-surface">{t('add.freeSubscription')}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !isFree;
-                      setIsFree(next);
-                      if (next) setPrice('0');
-                    }}
-                    className={cn(
-                      'relative w-11 h-6 rounded-full transition-colors',
-                      isFree ? 'bg-primary' : 'bg-outline-variant/40'
-                    )}
-                    aria-pressed={isFree}
-                  >
-                    <span
-                      className={cn(
-                        'absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all',
-                        isFree ? 'left-[22px]' : 'left-0.5'
-                      )}
-                    ></span>
-                  </button>
-                </label>
+                {/* V1.4.0：账单周期下拉（月付/季度付/年付/免费试用），替代原「免费订阅」开关 */}
+                <div className="space-y-2">
+                  <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.billingCycle')}</label>
+                  <div className="relative">
+                    <select
+                      className="w-full bg-surface-container-lowest border-none rounded-lg p-4 pr-10 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm"
+                      value={cycle}
+                      onChange={(e) => {
+                        const next = e.target.value as typeof cycle;
+                        setCycle(next);
+                        if (next === 'trial') setPrice('0');
+                      }}
+                    >
+                      <option value="monthly">{t('add.cycleMonthly')}</option>
+                      <option value="quarterly">{t('add.cycleQuarterly')}</option>
+                      <option value="annually">{t('add.cycleAnnually')}</option>
+                      <option value="trial">{t('add.cycleTrial')}</option>
+                    </select>
+                    <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 text-outline-variant pointer-events-none rotate-90" size={18} />
+                  </div>
+                </div>
 
                 <div className="grid grid-cols-3 gap-3">
                   <div className="col-span-2 space-y-2">
@@ -259,11 +279,11 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                     <div className="relative">
                       <span className="absolute left-4 top-1/2 -translate-y-1/2 text-primary font-bold">{getCurrencySymbol(currency)}</span>
                       <input
-                        className="w-full bg-surface-container-lowest border-none rounded-lg py-4 pl-10 pr-4 focus:ring-2 focus:ring-primary/20 shadow-sm text-xl font-bold disabled:opacity-50"
+                        className="w-full h-14 bg-surface-container-lowest border-none rounded-lg px-4 pl-10 focus:ring-2 focus:ring-primary/20 shadow-sm text-xl font-bold disabled:opacity-50"
                         placeholder="0.00"
                         step="0.01"
                         type="number"
-                        disabled={isFree}
+                        disabled={cycle === 'trial'}
                         value={price}
                         onChange={(e) => setPrice(e.target.value)}
                       />
@@ -273,9 +293,9 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                     <label className="text-[11px] font-bold tracking-widest text-on-surface-variant uppercase ml-1">{t('add.currency')}</label>
                     <div className="relative">
                       <select
-                        className="w-full bg-surface-container-lowest border-none rounded-lg py-4 pl-3 pr-7 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm text-sm font-semibold truncate disabled:opacity-50"
+                        className="w-full h-14 bg-surface-container-lowest border-none rounded-lg px-4 pr-8 appearance-none focus:ring-2 focus:ring-primary/20 shadow-sm text-sm font-semibold truncate disabled:opacity-50"
                         value={currency}
-                        disabled={isFree}
+                        disabled={cycle === 'trial'}
                         onChange={(e) => setCurrency(e.target.value)}
                       >
                         {ACTIVE_CURRENCIES.map((c) => (
@@ -286,7 +306,6 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
                     </div>
                   </div>
                 </div>
-                <p className="text-xs text-on-surface-variant px-1">{t('add.freeHint')}</p>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
@@ -311,15 +330,64 @@ export default function AddSubscription({ onClose, onSuccess, initialData }: Add
               </section>
 
               {/* Action Button */}
-              <section className="pt-6">
-                <button 
+              <section className="pt-6 space-y-3">
+                <button
                   onClick={handleSave}
                   disabled={loading}
                   className="w-full py-4 bg-gradient-to-br from-primary to-primary-container text-white font-bold rounded-xl shadow-xl hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
                 >
                   {loading ? '...' : (initialData ? t('add.saveChanges') : t('add.addSubscription'))}
                 </button>
+                {initialData?.id && (
+                  <button
+                    onClick={() => setConfirmingDelete(true)}
+                    className="w-full py-3.5 rounded-xl border border-red-200 bg-red-50/60 text-red-600 font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all"
+                  >
+                    <Trash2 size={16} />
+                    {t('subs.delete')}
+                  </button>
+                )}
               </section>
+
+              {/* 删除二次确认 */}
+              <AnimatePresence>
+                {confirmingDelete && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[80] bg-black/40 flex items-center justify-center px-8"
+                    onClick={() => !deleting && setConfirmingDelete(false)}
+                  >
+                    <motion.div
+                      initial={{ scale: 0.92, opacity: 0 }}
+                      animate={{ scale: 1, opacity: 1 }}
+                      exit={{ scale: 0.95, opacity: 0 }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="bg-surface rounded-2xl p-6 w-full max-w-xs text-center shadow-2xl"
+                    >
+                      <h3 className="text-base font-bold text-on-surface">{t('subs.delete')}</h3>
+                      <p className="text-sm text-on-surface-variant mt-2 leading-relaxed">{t('subs.deleteConfirm')}</p>
+                      <div className="flex gap-3 mt-5">
+                        <button
+                          onClick={() => setConfirmingDelete(false)}
+                          disabled={deleting}
+                          className="flex-1 py-2.5 rounded-xl border border-outline-variant/30 text-on-surface-variant font-bold text-sm active:scale-95 transition-all"
+                        >
+                          {t('settings.cancelLogout')}
+                        </button>
+                        <button
+                          onClick={() => void handleDelete()}
+                          disabled={deleting}
+                          className="flex-1 py-2.5 rounded-xl bg-red-500 text-white font-bold text-sm active:scale-95 transition-all disabled:opacity-60"
+                        >
+                          {deleting ? '...' : t('subs.delete')}
+                        </button>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </motion.div>
           ) : (
             <motion.div
