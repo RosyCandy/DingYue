@@ -1,22 +1,19 @@
 import React from 'react';
 import {
-  Bell, Wallet, BarChart3, Download, Apple, Monitor, Terminal,
-  Package, Smartphone, LogIn,
+  Bell, Wallet, BarChart3, Download, Apple, Monitor, Smartphone, LogIn,
 } from 'lucide-react';
 import { version as appVersion } from '../../package.json';
 
-const RELEASE_BASE = 'https://github.com/RosyCandy/DingYue/releases/latest/download';
+// V1.3.12 起附件改用带版本号的规范命名（FlClash 风格）：
+//   DingYue-{版本}-android-arm64-v8a.apk / DingYue-{版本}-windows-x64.exe / DingYue-{版本}-macos-arm64.dmg
+// 版本号读自 package.json，发版时本页零维护；tag 一律用小写 v 前缀（如 v1.3.12）。
+// 注意：新版 web 上线早于 Release 发布时，下载按钮会临时 404，发布后即恢复。
+const RELEASE_BASE = `https://github.com/RosyCandy/DingYue/releases/download/v${appVersion}`;
 
-// 各平台下载指向 GitHub Release 的固定文件名（发版时按此命名上传附件）：
-// DingYue-mac.dmg / DingYue-setup.exe / DingYue-amd64.deb / DingYue-x86_64.rpm
-// DingYue-x86_64.AppImage / DingYue-arm64.AppImage / DingYue.apk
 const DOWNLOADS = [
-  { label: 'macOS', file: 'DingYue-mac.dmg', icon: <Apple size={18} /> },
-  { label: 'Windows', file: 'DingYue-setup.exe', icon: <Monitor size={18} /> },
-  { label: 'Debian / Ubuntu', file: 'DingYue-amd64.deb', icon: <Package size={18} /> },
-  { label: 'Fedora / RedHat', file: 'DingYue-x86_64.rpm', icon: <Package size={18} /> },
-  { label: 'Linux AppImage', file: 'DingYue-x86_64.AppImage', icon: <Terminal size={18} /> },
-  { label: 'Android APK', file: 'DingYue.apk', icon: <Smartphone size={18} /> },
+  { label: 'macOS (Apple Silicon)', file: `DingYue-${appVersion}-macos-arm64.dmg`, icon: <Apple size={18} /> },
+  { label: 'Windows (x64)', file: `DingYue-${appVersion}-windows-x64.exe`, icon: <Monitor size={18} /> },
+  { label: 'Android APK', file: `DingYue-${appVersion}-android-arm64-v8a.apk`, icon: <Smartphone size={18} /> },
 ];
 
 const FEATURES = [
