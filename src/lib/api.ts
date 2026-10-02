@@ -136,7 +136,7 @@ export interface PaymentMethodInput {
 }
 
 export interface UserSettings {
-  theme: 'Light' | 'Dark';
+  theme: 'Light' | 'Dark' | 'Forest';
   language: 'English' | '简体中文' | '繁體中文' | 'Latin' | '한국어';
   appLockEnabled: boolean;
   cloudSyncEnabled: boolean;
@@ -347,7 +347,7 @@ const normalizePaymentMethod = (item: any): PaymentMethod => ({
 const normalizeCustomCategory = (item: any): CustomCategory => ({
   id: Number(item.id),
   name: String(item.name || ''),
-  color: String(item.color || '#2f7d52'),
+  color: String(item.color || '#0054cd'),
   createdAt: item.createdAt ?? item.created_at,
   updatedAt: item.updatedAt ?? item.updated_at,
 });
@@ -361,7 +361,7 @@ const normalizeLanguage = (language: unknown): UserSettings['language'] => {
 };
 
 const normalizeUserSettings = (item: any): UserSettings => ({
-  theme: (item.theme === 'Dark' ? 'Dark' : 'Light') as UserSettings['theme'],
+  theme: (['Light', 'Dark', 'Forest'].includes(item.theme) ? item.theme : 'Light') as UserSettings['theme'],
   language: normalizeLanguage(item.language),
   appLockEnabled: Boolean(item.appLockEnabled ?? item.app_lock_enabled),
   cloudSyncEnabled: Boolean(item.cloudSyncEnabled ?? item.cloud_sync_enabled),
@@ -488,7 +488,7 @@ export const api = {
       name: item.name,
       count: Number(item.count || 0),
       monthlyTotal: Number(item.monthlyTotal ?? item.monthly_total ?? 0),
-      color: item.color || '#2f7d52',
+      color: item.color || '#0054cd',
       isCustom: Boolean(item.isCustom ?? item.is_custom),
       customCategoryId: item.customCategoryId ?? item.custom_category_id ?? null,
     }));

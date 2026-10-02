@@ -30,9 +30,13 @@ import { version as appVersion } from '../../package.json';
 
 type Mode = 'login' | 'register' | 'forgot';
 
-export default function LoginPage() {
+export default function LoginPage({ initialMode }: { initialMode?: Mode } = {}) {
     const { login: authLogin } = useAuth();
-    const [mode, setMode] = useState<Mode>('login');
+    const [mode, setMode] = useState<Mode>(initialMode ?? 'login');
+    // 独立登录/注册页（/login.html、/register.html）：官网常驻根路径后，网页端的
+    // 登录/注册从官网跳转而来——登录成功整页回 /，登录/注册切换同步改 URL。
+    // 原生端与桌面壳在 App 内渲染本页，pathname 不匹配，行为不变。
+    const standaloneAuthPage = /\/(login|register)\.html$/.test(window.location.pathname);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [name, setName] = useState('');
@@ -97,6 +101,7 @@ export default function LoginPage() {
             return;
         }
         authLogin(token, user);
+        if (standaloneAuthPage) window.location.replace('/');
     };
 
     // passkey 桥接：桌面端 app:// origin 无法通过 WebAuthn 的 rpID 校验，
@@ -222,6 +227,9 @@ export default function LoginPage() {
         resetMessages();
         setCode('');
         setMode(next);
+        if (standaloneAuthPage && (next === 'login' || next === 'register')) {
+            window.history.pushState({}, '', next === 'register' ? '/register.html' : '/login.html');
+        }
     };
 
     const handleSubmit = async () => {
@@ -482,51 +490,65 @@ export default function LoginPage() {
     }
 
     return (
-        <div className="min-h-screen bg-surface">
-            {/* 桌面 Web / 桌面壳：左侧品牌大图分栏（lg 起）；移动端隐藏，布局与原版一致 */}
-            <div className="hidden lg:block fixed inset-y-0 left-0 w-[46%] xl:w-[50%] overflow-hidden">
-                <img src="/bg.jpg" alt="" className="absolute inset-0 w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#07150c]/85 via-[#0a1d11]/35 to-[#0a1d11]/45" />
-                <div className="relative z-10 flex flex-col justify-between h-full p-10 xl:p-14 text-white">
-                    <div className="flex items-center gap-2.5">
-                        <img src="/icon.png" alt="DingYue" className="w-9 h-9 rounded-xl" />
-                        <span className="font-extrabold tracking-tight text-lg">DingYue</span>
-                    </div>
-                    <div>
-                        <h2 className="landing-serif italic text-5xl xl:text-6xl font-bold tracking-tight">DingYue</h2>
-                        <p className="mt-2 text-2xl font-extrabold">订阅管理助手</p>
-                        <p className="mt-4 text-white/75 text-sm leading-relaxed max-w-sm">
-                            把散落各处的订阅集中到一处——记录、提醒、统计，让每一笔自动续费都清清楚楚。
-                        </p>
-                        <div className="mt-8 flex flex-wrap gap-2">
-                            {['到期提醒', '多币种换算', '支出统计', '云端同步'].map((t) => (
-                                <span key={t} className="px-3 py-1.5 rounded-full bg-white/10 border border-white/25 backdrop-blur text-xs font-semibold">
-                                    {t}
-                                </span>
-                            ))}
-                        </div>
-                    </div>
-                    <p className="text-xs text-white/50">支持 iOS · Android · Windows · macOS · Linux · 网页版</p>
+        <div className="landing-root min-h-screen relative flex bg-[#0a1d11]">
+            {/* 全屏背景大图（官网同款）：整页压图，表单直接浮在图上 */}
+            <img src="/bg.jpg" alt="" className="absolute inset-0 w-full h-full object-cover" />
+            <div className="absolute inset-0 bg-gradient-to-b from-[#07150c]/80 via-[#0a1d11]/50 to-[#07150c]/85" />
+            {/* 左右分界的流动曲线（lg+）：左半品牌区额外加深，右半保持透亮 */}
+            <svg className="hidden lg:block absolute inset-0 w-full h-full" viewBox="0 0 1440 900" preserveAspectRatio="none" aria-hidden="true">
+                <defs>
+                    <linearGradient id="loginLeftShade" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0" stopColor="#07150c" stopOpacity="0.6" />
+                        <stop offset="1" stopColor="#07150c" stopOpacity="0.1" />
+                    </linearGradient>
+                </defs>
+                <path d="M0,0 H740 C620,170 865,330 705,490 C580,615 795,770 655,900 H0 Z" fill="url(#loginLeftShade)" />
+                <path d="M740,0 C620,170 865,330 705,490 C580,615 795,770 655,900" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="2" />
+                <path d="M772,0 C652,170 897,330 737,490 C612,615 827,770 687,900" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" />
+            </svg>
+
+            {/* 左半：品牌区（lg+） */}
+            <div className="hidden lg:flex relative z-10 w-1/2 flex-col justify-between p-12 xl:p-16 text-white">
+                <div className="flex items-center gap-2.5">
+                    <img src="/icon.png" alt="DingYue" className="w-9 h-9 rounded-xl" />
+                    <span className="font-extrabold tracking-tight text-lg">DingYue</span>
                 </div>
+                <div className="max-w-md">
+                    <h2 className="landing-serif italic text-5xl xl:text-6xl font-bold tracking-tight">DingYue</h2>
+                    <p className="mt-2 text-2xl font-extrabold">订阅管理助手</p>
+                    <p className="mt-4 text-white/75 text-sm leading-relaxed">
+                        把散落各处的订阅集中到一处——记录、提醒、统计，让每一笔自动续费都清清楚楚。
+                    </p>
+                    <div className="mt-8 flex flex-wrap gap-2">
+                        {['到期提醒', '多币种换算', '支出统计', '云端同步'].map((t) => (
+                            <span key={t} className="px-3 py-1.5 rounded-full bg-white/10 border border-white/25 backdrop-blur text-xs font-semibold">
+                                {t}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+                <p className="text-xs text-white/50">支持 iOS · Android · Windows · macOS · Linux · 网页版</p>
             </div>
-            <div className="min-h-screen flex items-center justify-center px-6 py-10 lg:ml-[46%] xl:ml-[50%]">
+
+            {/* 右半：表单（透明，直接看到背景图） */}
+            <div className="relative z-10 flex-1 lg:w-1/2 flex items-center justify-center px-6 py-10">
             <div className="w-full max-w-sm space-y-6">
                 <div className="text-center">
-                    <h1 className="text-3xl font-black tracking-tight">DingYue 订阅管理助手</h1>
-                    <p className="text-on-surface-variant mt-1 text-sm">{title}</p>
+                    <h1 className="text-3xl font-black tracking-tight text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.45)]">DingYue 订阅管理助手</h1>
+                    <p className="text-white/80 mt-1 text-sm drop-shadow">{title}</p>
                 </div>
 
                 <div className="space-y-3">
                     {mode === 'register' && (
-                        <input className="w-full px-4 py-3 rounded-xl bg-surface-container-low outline-none text-sm"
+                        <input className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/25 backdrop-blur outline-none text-sm text-white placeholder-white/50 focus:border-white/60 focus:bg-white/15 transition-colors"
                                placeholder="姓名" value={name} onChange={e => setName(e.target.value)} />
                     )}
-                    <input className="w-full px-4 py-3 rounded-xl bg-surface-container-low outline-none text-sm"
+                    <input className="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/25 backdrop-blur outline-none text-sm text-white placeholder-white/50 focus:border-white/60 focus:bg-white/15 transition-colors"
                            placeholder="邮箱" type="email" autoComplete="email" value={email}
                            onChange={e => setEmail(e.target.value)} />
                     {mode !== 'forgot' && (
                         <div className="relative">
-                            <input className="w-full px-4 py-3 pr-12 rounded-xl bg-surface-container-low outline-none text-sm"
+                            <input className="w-full px-4 py-3 pr-12 rounded-xl bg-white/10 border border-white/25 backdrop-blur outline-none text-sm text-white placeholder-white/50 focus:border-white/60 focus:bg-white/15 transition-colors"
                                    placeholder="密码" type={showPassword ? 'text' : 'password'}
                                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                                    value={password} onChange={e => setPassword(e.target.value)} />
@@ -535,7 +557,7 @@ export default function LoginPage() {
                     )}
                     {mode === 'forgot' && (
                         <div className="relative">
-                            <input className="w-full px-4 py-3 pr-12 rounded-xl bg-surface-container-low outline-none text-sm"
+                            <input className="w-full px-4 py-3 pr-12 rounded-xl bg-white/10 border border-white/25 backdrop-blur outline-none text-sm text-white placeholder-white/50 focus:border-white/60 focus:bg-white/15 transition-colors"
                                    placeholder="新密码（至少 6 位）" type={showPassword ? 'text' : 'password'} autoComplete="new-password"
                                    value={newPassword} onChange={e => setNewPassword(e.target.value)} />
                             <PasswordVisibilityButton visible={showPassword} onToggle={() => setShowPassword(v => !v)} />
@@ -544,27 +566,27 @@ export default function LoginPage() {
 
                     {mode !== 'login' && (
                         <div className="flex gap-2">
-                            <input className="flex-1 min-w-0 px-4 py-3 rounded-xl bg-surface-container-low outline-none text-sm"
+                            <input className="flex-1 min-w-0 px-4 py-3 rounded-xl bg-white/10 border border-white/25 backdrop-blur outline-none text-sm text-white placeholder-white/50 focus:border-white/60 focus:bg-white/15 transition-colors"
                                    placeholder="邮箱验证码" inputMode="numeric" maxLength={6} value={code}
                                    onChange={e => setCode(e.target.value.replace(/\D/g, ''))} />
                             <button onClick={() => void handleSendCode()} disabled={codeSending || countdown > 0}
-                                    className="shrink-0 px-3 py-3 rounded-xl border border-outline-variant/30 text-xs font-bold text-primary active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100">
+                                    className="shrink-0 px-3 py-3 rounded-xl border border-white/40 text-xs font-bold text-white hover:bg-white/10 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100">
                                 {codeSending ? '发送中' : countdown > 0 ? `${countdown}s 后重发` : '发送验证码'}
                             </button>
                         </div>
                     )}
 
-                    {notice && <p className="text-primary text-xs text-center">{notice}</p>}
-                    {error && <p className="text-red-500 text-xs text-center">{error}</p>}
+                    {notice && <p className="text-[#8fe0b0] text-xs text-center drop-shadow">{notice}</p>}
+                    {error && <p className="text-red-300 text-xs text-center drop-shadow">{error}</p>}
 
                     <button onClick={() => void handleSubmit()} disabled={loading}
-                            className="w-full py-3 rounded-xl bg-primary text-white font-bold text-sm active:scale-95 transition-all disabled:opacity-50">
+                            className="w-full py-3 rounded-xl bg-[#3f9d6a] hover:bg-[#358a5b] text-white font-bold text-sm shadow-lg shadow-black/25 active:scale-95 transition-all disabled:opacity-50">
                         {loading ? '处理中...' : submitLabel}
                     </button>
 
                     {mode === 'login' && (
                         <button onClick={() => void handlePasskeyLogin()} disabled={passkeyLoading}
-                                className="w-full py-3 rounded-xl border border-outline-variant/30 bg-surface-container-low text-on-surface font-bold text-sm active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
+                                className="w-full py-3 rounded-xl bg-white/10 border border-white/30 backdrop-blur text-white font-bold text-sm active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2">
                             <Fingerprint size={18} />
                             {passkeyLoading ? '处理中...' : '通行密钥登录'}
                         </button>
@@ -572,7 +594,7 @@ export default function LoginPage() {
 
                     {mode === 'login' && (
                         <p className="text-center">
-                            <button onClick={() => switchMode('forgot')} className="text-xs text-on-surface-variant">
+                            <button onClick={() => switchMode('forgot')} className="text-xs text-white/80 hover:text-white transition-colors">
                                 忘记密码？
                             </button>
                         </p>
@@ -582,9 +604,9 @@ export default function LoginPage() {
                 {mode !== 'forgot' && (
                     <>
                         <div className="flex items-center gap-3">
-                            <div className="flex-1 h-px bg-outline-variant/30" />
-                            <span className="text-xs text-on-surface-variant">或使用以下方式登录</span>
-                            <div className="flex-1 h-px bg-outline-variant/30" />
+                            <div className="flex-1 h-px bg-white/20" />
+                            <span className="text-xs text-white/60">或使用以下方式登录</span>
+                            <div className="flex-1 h-px bg-white/20" />
                         </div>
 
                         <div className="flex flex-wrap items-center justify-center gap-3">
@@ -625,30 +647,30 @@ export default function LoginPage() {
                     </>
                 )}
 
-                <p className="text-center text-xs text-on-surface-variant">
+                <p className="text-center text-xs text-white/80 drop-shadow">
                     {mode === 'forgot'
                         ? '想起密码了？'
                         : mode === 'login'
                             ? '还没有账户？'
                             : '已有账户？'}
                     <button onClick={() => switchMode(mode === 'login' ? 'register' : 'login')}
-                            className="text-primary font-bold ml-1">
+                            className="text-[#8fe0b0] font-bold ml-1">
                         {mode === 'forgot' ? '返回登录' : mode === 'login' ? '注册' : '登录'}
                     </button>
                 </p>
-                <p className="text-center text-xs text-on-surface-variant pt-4">
+                <p className="text-center text-xs text-white/70 pt-4">
                     继续即代表同意
                     <button onClick={() => setLegalView('agreement')}
-                            className="text-primary font-bold mx-1 hover:underline">
+                            className="text-[#8fe0b0] font-bold mx-1 hover:underline">
                         用户协议
                     </button>
                     和
                     <button onClick={() => setLegalView('privacy')}
-                            className="text-primary font-bold mx-1 hover:underline">
+                            className="text-[#8fe0b0] font-bold mx-1 hover:underline">
                         隐私政策
                     </button>
                 </p>
-                <p className="text-center text-[10px] text-on-surface-variant font-medium opacity-40">
+                <p className="text-center text-[10px] text-white/40 font-medium">
                     DingYue v{appVersion}
                 </p>
                 </div>
@@ -660,7 +682,7 @@ export default function LoginPage() {
 function SocialButton({ label, onClick, disabled, children }: { label: string; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
     return (
         <button onClick={onClick} disabled={disabled} aria-label={label}
-                className="w-12 h-12 flex items-center justify-center rounded-full border border-outline-variant/30 bg-white active:scale-95 transition-all disabled:opacity-50">
+                className="w-12 h-12 flex items-center justify-center rounded-full bg-white/90 hover:bg-white shadow-md active:scale-95 transition-all disabled:opacity-50">
             {children}
         </button>
     );
@@ -670,7 +692,7 @@ function PasswordVisibilityButton({ visible, onToggle }: { visible: boolean; onT
     return (
         <button type="button" onClick={onToggle}
                 aria-label={visible ? '隐藏密码' : '显示密码'}
-                className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-full text-on-surface-variant active:scale-90 transition-all">
+                className="absolute right-2 top-1/2 -translate-y-1/2 w-9 h-9 flex items-center justify-center rounded-full text-white/70 hover:text-white active:scale-90 transition-all">
             {visible ? <EyeOff size={17} /> : <Eye size={17} />}
         </button>
     );

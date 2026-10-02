@@ -46,7 +46,28 @@
 
 @layer base {
   :root {
-    /* 森林淡绿主题（2026-10 落地页改版时从蓝色整体迁移） */
+    --primary: #0054cd;
+    --primary-container: #316ee9;
+    --surface: #f9f9fe;
+    --surface-container-low: #f3f3f8;
+    --surface-container-lowest: #ffffff;
+    --on-surface: #1a1c1f;
+    --on-surface-variant: #414755;
+    --outline-variant: #c1c6d7;
+  }
+  .dark {
+    --primary: #a8c7fa;
+    --primary-container: #004a77;
+    --surface: #111318;
+    --surface-container-low: #1d2024;
+    --surface-container-lowest: #0e1014;
+    --on-surface: #e2e2e9;
+    --on-surface-variant: #c4c6d0;
+    --outline-variant: #44474e;
+  }
+  /* 森林绿可选主题（设置 → 主题 → 森林绿，用户自选；默认仍是上面的浅色）。
+     基于浅色换肤；若同时处于暗色模式，只把主色换成森林绿的暗色对儿。 */
+  .forest {
     --primary: #2f7d52;
     --primary-container: #43a578;
     --surface: #f4f8f2;
@@ -56,22 +77,26 @@
     --on-surface-variant: #4d5a50;
     --outline-variant: #c2d2c3;
   }
-  .dark {
+  .forest.dark {
     --primary: #a5d6b5;
     --primary-container: #1c5e3c;
-    --surface: #10140f;
-    --surface-container-low: #191e18;
-    --surface-container-lowest: #0c0f0c;
-    --on-surface: #e2e6e1;
-    --on-surface-variant: #c3c9c2;
-    --outline-variant: #434a42;
   }
-  
+
   body {
     @apply bg-surface text-on-surface font-inter antialiased transition-colors duration-300;
   }
   h1, h2, h3, h4, h5, h6 {
     @apply font-manrope;
+  }
+
+  /* 细节抛光（参考 Material 3 / 主流订阅类 App 的微交互）：
+     输入控件聚焦有主题色光环反馈，文本选中色跟随主题 */
+  ::selection {
+    background: color-mix(in srgb, var(--primary) 24%, transparent);
+  }
+  input:focus, textarea:focus, select:focus {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
   }
 }
 

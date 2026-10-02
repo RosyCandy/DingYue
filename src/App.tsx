@@ -239,29 +239,23 @@ export default function App() {
     };
   }, [setLanguage, setTheme, user?.id]);
 
-  // 未登录时先展示产品落地页（介绍 + 下载），点「进入应用」后才是登录页；
-  // 会话内点过一次就不再重复出现。
-  // 桌面壳与手机/平板原生 App 一律跳过——它们是软件本体，不是官网访客
+  // 官网常驻根路径：网页访客未登录一律先看官网（/），登录/注册走独立页面
+  // /login.html、/register.html（enterApp 整页跳转过去），官网不再被登录页抢位。
+  // 桌面壳与手机/平板原生 App 一律跳过官网——它们是软件本体，不是官网访客；
+  // OAuth 带 code/passkey 回跳、桌面桥接子窗口也不能被官网挡住。
   const isDesktopApp = /Electron/i.test(navigator.userAgent);
   const isNativeApp = Capacitor.isNativePlatform();
-  const [landingVisible, setLandingVisible] = useState(
-    () => !user && !isDesktopApp && !isNativeApp && sessionStorage.getItem('landing_entered') !== '1'
-  );
-
-  // 桌面桥接子窗口（?bridge=google / passkey）：本窗口只负责在真实站点 origin 下
-  // 完成特定操作，强制渲染登录页承载桥接逻辑，跳过落地页与已登录态。
-  const isBridgeWindow = useMemo(
-    () => new URLSearchParams(window.location.search).has('bridge'),
-    []
-  );
+  const urlParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const isBridgeWindow = urlParams.has('bridge');
+  const hasAuthCallbackParams = urlParams.has('code') || urlParams.has('passkey_login') || urlParams.has('passkey_bridge');
+  const showLanding = !user && !isDesktopApp && !isNativeApp && !isBridgeWindow && !hasAuthCallbackParams;
 
   const enterApp = () => {
-    sessionStorage.setItem('landing_entered', '1');
-    setLandingVisible(false);
+    window.location.href = '/login.html';
   };
 
   if (isBridgeWindow) return <LoginPage />;
-  if (!user && landingVisible) return <LandingPage onEnter={enterApp} />;
+  if (!user && showLanding) return <LandingPage onEnter={enterApp} />;
   if (!user) return <LoginPage />;
 
   const renderContent = () => {

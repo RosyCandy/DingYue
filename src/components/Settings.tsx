@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Language, useI18n } from '../lib/i18n';
-import { useTheme } from '../lib/theme';
+import { useTheme, type Theme } from '../lib/theme';
 import NotificationCenter from './NotificationCenter';
 import SocialLoginPage from './SocialLoginPage';
 import { useBackHandler } from '../lib/backButton';
@@ -89,6 +89,7 @@ export default function Settings() {
     }
   };
   const [showLanguageSelect, setShowLanguageSelect] = useState(false);
+  const [showThemeSelect, setShowThemeSelect] = useState(false);
   const [settingsLoading, setSettingsLoading] = useState(true);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
@@ -130,6 +131,7 @@ export default function Settings() {
   const goBack = () => setView(VIEW_PARENT[view]);
   useBackHandler(goBack, view !== 'main');
   useBackHandler(() => setShowLanguageSelect(false), showLanguageSelect);
+  useBackHandler(() => setShowThemeSelect(false), showThemeSelect);
 
   const pickLocalized = (text: LocalizedText): string =>
     language === '简体中文' || language === '繁體中文' ? text.zh || text.en : text.en || text.zh;
@@ -213,10 +215,10 @@ export default function Settings() {
     }
   };
 
-  const handleThemeToggle = async () => {
-    const nextTheme = theme === 'Light' ? 'Dark' : 'Light';
-    setTheme(nextTheme);
-    await saveSettings({ theme: nextTheme });
+  const handleThemeChange = async (next: Theme) => {
+    setTheme(next);
+    setShowThemeSelect(false);
+    await saveSettings({ theme: next });
   };
 
   const handleLanguageChange = async (nextLanguage: Language) => {
@@ -812,7 +814,7 @@ export default function Settings() {
                       type="checkbox"
                       checked={selectedDeleted.length === deletedSubs.length && deletedSubs.length > 0}
                       onChange={(e) => setSelectedDeleted(e.target.checked ? deletedSubs.map((s) => s.id) : [])}
-                      className="w-4 h-4 accent-[#2f7d52]"
+                      className="w-4 h-4 accent-[#0054cd]"
                     />
                     {t('recycle.selectAll')}
                   </label>
@@ -823,7 +825,7 @@ export default function Settings() {
                           type="checkbox"
                           checked={selectedDeleted.includes(sub.id)}
                           onChange={(e) => setSelectedDeleted((prev) => e.target.checked ? [...prev, sub.id] : prev.filter((x) => x !== sub.id))}
-                          className="w-4 h-4 accent-[#2f7d52] shrink-0"
+                          className="w-4 h-4 accent-[#0054cd] shrink-0"
                         />
                         <div className="w-8 h-8 rounded-lg overflow-hidden bg-surface-container-lowest shrink-0 flex items-center justify-center">
                           {sub.icon ? (
@@ -1000,8 +1002,8 @@ export default function Settings() {
                 <SettingsItem
                   icon={<Palette size={18} />}
                   label={t('settings.theme')}
-                  value={theme === 'Light' ? t('settings.light') || 'Light' : t('settings.dark') || 'Dark'}
-                  onClick={() => void handleThemeToggle()}
+                  value={theme === 'Light' ? t('settings.light') || 'Light' : theme === 'Dark' ? t('settings.dark') || 'Dark' : t('settings.forest') || 'Forest'}
+                  onClick={() => setShowThemeSelect(true)}
                 />
                 <SettingsItem
                   icon={<Languages size={18} />}
@@ -1130,6 +1132,44 @@ export default function Settings() {
                 >
                   <span className={cn("font-medium", language === option.value ? "text-primary font-bold" : "text-on-surface")}>{option.label}</span>
                   {language === option.value && <Check size={18} className="text-primary"/>}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 主题选择：浅色 / 深色 / 森林绿（自选，默认浅色） */}
+      {showThemeSelect && (
+        <div className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="bg-surface w-full max-w-sm rounded-3xl p-6 space-y-4 animate-in slide-in-from-bottom-8 duration-300">
+            <div className="flex justify-between items-center mb-2">
+              <h3 className="font-bold text-lg text-on-surface">{t('settings.selectTheme')}</h3>
+              <button onClick={() => setShowThemeSelect(false)} className="p-2 hover:bg-surface-container-high rounded-full transition-colors">
+                <X size={20} className="text-on-surface-variant" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {([
+                { value: 'Light' as Theme, label: t('settings.light') || 'Light', swatch: 'bg-surface-container-lowest', ring: true },
+                { value: 'Dark' as Theme, label: t('settings.dark') || 'Dark', swatch: 'bg-[#111318]' },
+                { value: 'Forest' as Theme, label: t('settings.forest') || 'Forest', swatch: 'bg-[#2f7d52]' },
+              ]).map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => { void handleThemeChange(option.value); }}
+                  className={cn(
+                    "w-full flex justify-between items-center p-4 rounded-2xl transition-colors active:scale-[0.98]",
+                    theme === option.value
+                      ? "bg-primary/10 border border-primary/20"
+                      : "bg-surface-container-lowest border border-outline-variant/10 hover:bg-surface-container-low"
+                  )}
+                >
+                  <span className={cn("font-medium flex items-center gap-3", theme === option.value ? "text-primary font-bold" : "text-on-surface")}>
+                    <span className={cn("w-6 h-6 rounded-full shrink-0", option.swatch, option.ring && "ring-1 ring-outline-variant")} />
+                    {option.label}
+                  </span>
+                  {theme === option.value && <Check size={18} className="text-primary"/>}
                 </button>
               ))}
             </div>

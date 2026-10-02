@@ -1,14 +1,12 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>DingYue</title>
+    <title>注册 · DingYue</title>
     <link rel="icon" type="image/png" href="/icon.png" />
-    <!-- 字体已在 src/index.css 自托管（/fonts/*.woff2），不再请求 fonts.googleapis.com：
-         大陆网络下该域名不可达，<head> 里的样式表会阻塞首屏导致长时间白屏 -->
     <style>
-      /* JS 加载完成前的品牌加载骨架：大陆/弱网下把“白屏等待”变成可感知的启动页 */
+      /* 与 index.html 同款品牌启动骨架 */
       #boot-splash {
         position: fixed;
         inset: 0;
@@ -50,6 +48,6 @@
       <div class="boot-spinner"></div>
     </div>
     <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <script type="module" src="/src/login-main.tsx"></script>
   </body>
 </html>

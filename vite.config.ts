@@ -21,6 +21,12 @@ export default defineConfig(({mode}) => {
     },
     build: {
       rollupOptions: {
+        // 官网常驻 index.html（根路径）；登录/注册是独立页面 /login.html、/register.html
+        input: {
+          main: path.resolve(__dirname, 'index.html'),
+          login: path.resolve(__dirname, 'login.html'),
+          register: path.resolve(__dirname, 'register.html'),
+        },
         output: {
           // 框架依赖拆成独立 chunk：业务代码迭代时它们保持不变，浏览器缓存跨版本复用
           manualChunks(id) {

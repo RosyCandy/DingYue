@@ -159,7 +159,7 @@ type AuthenticatedRequest = Request & {
 
 type MembershipPlan = 'trial' | 'monthly' | 'annual' | 'lifetime';
 type MembershipStatus = 'trial' | 'active' | 'expired' | 'canceled';
-type UserTheme = 'Light' | 'Dark';
+type UserTheme = 'Light' | 'Dark' | 'Forest';
 type UserLanguage = 'English' | '简体中文' | '繁體中文' | 'Latin' | '한국어';
 type NotificationType = 'billing_due' | 'trial_ending' | 'membership' | 'system';
 type NotificationSeverity = 'info' | 'warning' | 'critical';
@@ -501,6 +501,11 @@ async function ensureDatabaseSchema() {
     ALTER TABLE subscriptions
       MODIFY billing_cycle ENUM('monthly', 'quarterly', 'annually', 'trial') NOT NULL DEFAULT 'monthly'
   `);
+  // V1.4.1：主题加入森林绿（用户自选，默认仍是浅色）
+  await pool.execute(`
+    ALTER TABLE user_settings
+      MODIFY theme ENUM('Light', 'Dark', 'Forest') NOT NULL DEFAULT 'Light'
+  `);
 
   const [subscriptionIndexes]: any = await pool.query(
     `SHOW INDEX FROM subscriptions WHERE Key_name = 'idx_subscriptions_user_id'`
@@ -570,7 +575,7 @@ async function ensureDatabaseSchema() {
   await pool.execute(`
     CREATE TABLE IF NOT EXISTS user_settings (
       user_id INT PRIMARY KEY,
-      theme ENUM('Light', 'Dark') NOT NULL DEFAULT 'Light',
+      theme ENUM('Light', 'Dark', 'Forest') NOT NULL DEFAULT 'Light',
       language ENUM('English', '简体中文', '繁體中文', 'Latin', '한국어') NOT NULL DEFAULT 'English',
       app_lock_enabled BOOLEAN NOT NULL DEFAULT FALSE,
       cloud_sync_enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -3033,9 +3038,10 @@ app.put('/api/settings', authRequired, async (req: AuthenticatedRequest, res) =>
     const values: any[] = [];
 
     if (req.body?.theme !== undefined) {
-      const theme = req.body.theme === 'Dark' ? 'Dark' : 'Light';
+      const themeInput = String(req.body.theme);
+      const theme = (['Light', 'Dark', 'Forest'].includes(themeInput) ? themeInput : 'Light') as UserTheme;
       updates.push('theme = ?');
-      values.push(theme as UserTheme);
+      values.push(theme);
     }
 
     if (req.body?.language !== undefined) {

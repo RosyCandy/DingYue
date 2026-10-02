@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 
-type Theme = 'Light' | 'Dark';
+// 三种主题：浅色（默认）/ 深色 / 森林绿（可选，浅色底 + 森林绿主色）。
+// Forest 通过 .forest 类换肤，与 .dark 互斥；用户在设置页选择并随 user_settings 持久化。
+export type Theme = 'Light' | 'Dark' | 'Forest';
 
 interface ThemeContextType {
   theme: Theme;
@@ -15,11 +17,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const root = window.document.documentElement;
-    if (theme === 'Dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
+    root.classList.toggle('dark', theme === 'Dark');
+    root.classList.toggle('forest', theme === 'Forest');
   }, [theme]);
 
   const toggleTheme = () => {

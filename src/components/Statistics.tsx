@@ -360,8 +360,8 @@ export default function Statistics() {
                         return (
                           <Cell
                             key={`cell-${index}`}
-                            fill={isNow ? '#2f7d52' : entry.forecast ? '#e8ede7' : entry.value > 0 ? '#8fcba9' : '#edf1eb'}
-                            stroke={entry.forecast ? '#c2d2c3' : 'none'}
+                            fill={isNow ? '#0054cd' : entry.forecast ? '#e8e8ed' : entry.value > 0 ? '#7ba7e8' : '#ededf2'}
+                            stroke={entry.forecast ? '#c1c6d7' : 'none'}
                             strokeDasharray={entry.forecast ? '4 4' : '0'}
                           />
                         );
