@@ -105,3 +105,31 @@
      安卓/网页 env=0 时退回 0.75rem 防止贴死 */
   padding-bottom: max(env(safe-area-inset-bottom), 0.75rem);
 }
+
+/* ==================== 官网落地页（LandingPage）森林淡绿主题 ====================
+   落地页只出现在网页访客面前（原生端/桌面壳不渲染），这里在 .landing-root 子树内
+   把 Material 色板整体覆盖成森林淡绿，App 内页面不受影响；组件挂载时还会临时在
+   :root 上覆盖 --primary/--surface（body 背景、滚动过界底色同步变绿），卸载时还原。 */
+.landing-root {
+  --primary: #2f7d52;
+  --primary-container: #8fcba9;
+  --surface: #f4f8f2;
+  --surface-container-low: #ecf3e9;
+  --surface-container-lowest: #ffffff;
+  --on-surface: #182018;
+  --on-surface-variant: #4d5a50;
+  --outline-variant: #c2d2c3;
+  --color-primary: #2f7d52;
+  --color-primary-container: #8fcba9;
+  --color-surface: #f4f8f2;
+  --color-surface-container-low: #ecf3e9;
+  --color-surface-container-lowest: #ffffff;
+  --color-on-surface: #182018;
+  --color-on-surface-variant: #4d5a50;
+  --color-outline-variant: #c2d2c3;
+}
+
+/* 模版站同款衬线大标题：Playfair 只含 latin 子集，中文回落系统衬线 */
+.landing-serif {
+  font-family: 'Playfair Display', Georgia, 'Songti SC', 'SimSun', serif;
+}
