@@ -498,34 +498,37 @@ export default function LoginPage({ initialMode }: { initialMode?: Mode } = {}) 
             <svg className="hidden lg:block absolute inset-0 w-full h-full" viewBox="0 0 1440 900" preserveAspectRatio="none" aria-hidden="true">
                 <defs>
                     <linearGradient id="loginLeftShade" x1="0" y1="0" x2="1" y2="0">
-                        <stop offset="0" stopColor="#07150c" stopOpacity="0.6" />
-                        <stop offset="1" stopColor="#07150c" stopOpacity="0.1" />
+                        <stop offset="0" stopColor="#07150c" stopOpacity="0.35" />
+                        <stop offset="1" stopColor="#07150c" stopOpacity="0.04" />
                     </linearGradient>
                 </defs>
                 <path d="M0,0 H740 C620,170 865,330 705,490 C580,615 795,770 655,900 H0 Z" fill="url(#loginLeftShade)" />
             </svg>
 
             {/* 左半：品牌区（lg+） */}
-            <div className="hidden lg:flex relative z-10 w-1/2 flex-col justify-between p-12 xl:p-16 text-white">
+            <div className="hidden lg:flex relative z-10 w-1/2 flex-col p-12 xl:p-16 text-white">
                 <div className="flex items-center gap-2.5">
                     <img src="/icon.png" alt="DingYue" className="w-9 h-9 rounded-xl" />
                     <span className="font-extrabold tracking-tight text-lg">DingYue</span>
                 </div>
-                <div className="max-w-md">
-                    <h2 className="landing-serif italic text-5xl xl:text-6xl font-bold tracking-tight">DingYue</h2>
-                    <p className="mt-2 text-2xl font-extrabold">订阅管理助手</p>
-                    <p className="mt-4 text-white/75 text-sm leading-relaxed">
-                        把散落各处的订阅集中到一处——记录、提醒、统计，让每一笔自动续费都清清楚楚。
-                    </p>
-                    <div className="mt-8 flex flex-wrap gap-2">
-                        {['到期提醒', '多币种换算', '支出统计', '云端同步'].map((t) => (
-                            <span key={t} className="px-3 py-1.5 rounded-full bg-white/10 border border-white/25 backdrop-blur text-xs font-semibold">
-                                {t}
-                            </span>
-                        ))}
+                <div className="flex-1 flex items-center">
+                    <div className="max-w-md">
+                        <h2 className="landing-serif italic text-5xl xl:text-6xl font-bold tracking-tight">DingYue</h2>
+                        <p className="mt-2 text-2xl font-extrabold">订阅管理助手</p>
+                        <p className="mt-4 text-white/75 text-sm leading-relaxed">
+                            把散落各处的订阅集中到一处——记录、提醒、统计，
+                            <br />
+                            让每一笔自动续费都清清楚楚。
+                        </p>
+                        <div className="mt-8 flex flex-wrap gap-2">
+                            {['到期提醒', '多币种换算', '支出统计', '云端同步'].map((t) => (
+                                <span key={t} className="px-3 py-1.5 rounded-full bg-white/10 border border-white/25 backdrop-blur text-xs font-semibold">
+                                    {t}
+                                </span>
+                            ))}
+                        </div>
                     </div>
                 </div>
-                <p className="text-xs text-white/50">支持 iOS · Android · Windows · macOS · Linux · 网页版</p>
             </div>
 
             {/* 右半：表单（透明，直接看到背景图） */}
