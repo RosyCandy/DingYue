@@ -89,8 +89,35 @@
     @apply font-manrope;
   }
 
-  /* 细节抛光（参考 Material 3 / 主流订阅类 App 的微交互）：
-     输入控件聚焦有主题色光环反馈，文本选中色跟随主题 */
+  /* 细节抛光（参考 Bobby / Revolut 等订阅类 App 的通用手法 + 微交互指南）：
+     ① 全局等宽数字：列表里的金额、日期对齐且数值变化时不抖动
+     ② 桌面端（精确指针）细滚动条，颜色跟随主题
+     ③ 尊重系统「减少动态效果」设置（微交互可访问性基线） */
+  body {
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (pointer: fine) {
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--on-surface-variant) 30%, transparent);
+      border-radius: 8px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: color-mix(in srgb, var(--on-surface-variant) 45%, transparent);
+    }
+    ::-webkit-scrollbar-track { background: transparent; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+
+  /* 输入控件聚焦有主题色光环反馈，文本选中色跟随主题 */
   ::selection {
     background: color-mix(in srgb, var(--primary) 24%, transparent);
   }
