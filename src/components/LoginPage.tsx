@@ -503,8 +503,6 @@ export default function LoginPage({ initialMode }: { initialMode?: Mode } = {}) 
                     </linearGradient>
                 </defs>
                 <path d="M0,0 H740 C620,170 865,330 705,490 C580,615 795,770 655,900 H0 Z" fill="url(#loginLeftShade)" />
-                <path d="M740,0 C620,170 865,330 705,490 C580,615 795,770 655,900" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="2" />
-                <path d="M772,0 C652,170 897,330 737,490 C612,615 827,770 687,900" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5" />
             </svg>
 
             {/* 左半：品牌区（lg+） */}
