@@ -812,7 +812,7 @@ export default function Settings() {
                       type="checkbox"
                       checked={selectedDeleted.length === deletedSubs.length && deletedSubs.length > 0}
                       onChange={(e) => setSelectedDeleted(e.target.checked ? deletedSubs.map((s) => s.id) : [])}
-                      className="w-4 h-4 accent-[#0054cd]"
+                      className="w-4 h-4 accent-[#2f7d52]"
                     />
                     {t('recycle.selectAll')}
                   </label>
@@ -823,7 +823,7 @@ export default function Settings() {
                           type="checkbox"
                           checked={selectedDeleted.includes(sub.id)}
                           onChange={(e) => setSelectedDeleted((prev) => e.target.checked ? [...prev, sub.id] : prev.filter((x) => x !== sub.id))}
-                          className="w-4 h-4 accent-[#0054cd] shrink-0"
+                          className="w-4 h-4 accent-[#2f7d52] shrink-0"
                         />
                         <div className="w-8 h-8 rounded-lg overflow-hidden bg-surface-container-lowest shrink-0 flex items-center justify-center">
                           {sub.icon ? (

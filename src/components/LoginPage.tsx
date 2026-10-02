@@ -482,7 +482,34 @@ export default function LoginPage() {
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-surface px-6 py-10">
+        <div className="min-h-screen bg-surface">
+            {/* 桌面 Web / 桌面壳：左侧品牌大图分栏（lg 起）；移动端隐藏，布局与原版一致 */}
+            <div className="hidden lg:block fixed inset-y-0 left-0 w-[46%] xl:w-[50%] overflow-hidden">
+                <img src="/bg.jpg" alt="" className="absolute inset-0 w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#07150c]/85 via-[#0a1d11]/35 to-[#0a1d11]/45" />
+                <div className="relative z-10 flex flex-col justify-between h-full p-10 xl:p-14 text-white">
+                    <div className="flex items-center gap-2.5">
+                        <img src="/icon.png" alt="DingYue" className="w-9 h-9 rounded-xl" />
+                        <span className="font-extrabold tracking-tight text-lg">DingYue</span>
+                    </div>
+                    <div>
+                        <h2 className="landing-serif italic text-5xl xl:text-6xl font-bold tracking-tight">DingYue</h2>
+                        <p className="mt-2 text-2xl font-extrabold">订阅管理助手</p>
+                        <p className="mt-4 text-white/75 text-sm leading-relaxed max-w-sm">
+                            把散落各处的订阅集中到一处——记录、提醒、统计，让每一笔自动续费都清清楚楚。
+                        </p>
+                        <div className="mt-8 flex flex-wrap gap-2">
+                            {['到期提醒', '多币种换算', '支出统计', '云端同步'].map((t) => (
+                                <span key={t} className="px-3 py-1.5 rounded-full bg-white/10 border border-white/25 backdrop-blur text-xs font-semibold">
+                                    {t}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
+                    <p className="text-xs text-white/50">支持 iOS · Android · Windows · macOS · Linux · 网页版</p>
+                </div>
+            </div>
+            <div className="min-h-screen flex items-center justify-center px-6 py-10 lg:ml-[46%] xl:ml-[50%]">
             <div className="w-full max-w-sm space-y-6">
                 <div className="text-center">
                     <h1 className="text-3xl font-black tracking-tight">DingYue 订阅管理助手</h1>
@@ -624,6 +651,7 @@ export default function LoginPage() {
                 <p className="text-center text-[10px] text-on-surface-variant font-medium opacity-40">
                     DingYue v{appVersion}
                 </p>
+                </div>
             </div>
         </div>
     );

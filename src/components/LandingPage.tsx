@@ -372,13 +372,13 @@ export default function LandingPage({ onEnter }: { onEnter: () => void }) {
             <button onClick={() => jump('faq')} className={`px-3.5 py-2 rounded-lg text-sm font-semibold transition-colors ${navBtn}`}>常见问题</button>
           </nav>
 
-          {/* 右侧：支持/联系我们 + 登录注册 */}
+          {/* 右侧：联系我们 + 登录注册 */}
           <div className="hidden lg:flex items-center gap-2 ml-auto shrink-0">
             <a
               href={`mailto:${CONTACT_EMAIL}`}
               className={`px-3.5 py-2 rounded-lg text-sm font-semibold transition-colors ${navBtn}`}
             >
-              支持 / 联系我们
+              联系我们
             </a>
             <button
               onClick={onEnter}
@@ -455,7 +455,7 @@ export default function LandingPage({ onEnter }: { onEnter: () => void }) {
                     href={`mailto:${CONTACT_EMAIL}`}
                     className="flex items-center rounded-xl px-3 py-2.5 text-sm font-semibold text-on-surface-variant hover:text-on-surface hover:bg-surface-container-low transition-colors"
                   >
-                    支持 / 联系我们
+                    联系我们
                   </a>
                 </div>
               </div>

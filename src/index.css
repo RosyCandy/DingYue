@@ -46,24 +46,25 @@
 
 @layer base {
   :root {
-    --primary: #0054cd;
-    --primary-container: #316ee9;
-    --surface: #f9f9fe;
-    --surface-container-low: #f3f3f8;
+    /* 森林淡绿主题（2026-10 落地页改版时从蓝色整体迁移） */
+    --primary: #2f7d52;
+    --primary-container: #43a578;
+    --surface: #f4f8f2;
+    --surface-container-low: #ecf3e9;
     --surface-container-lowest: #ffffff;
-    --on-surface: #1a1c1f;
-    --on-surface-variant: #414755;
-    --outline-variant: #c1c6d7;
+    --on-surface: #182018;
+    --on-surface-variant: #4d5a50;
+    --outline-variant: #c2d2c3;
   }
   .dark {
-    --primary: #a8c7fa;
-    --primary-container: #004a77;
-    --surface: #111318;
-    --surface-container-low: #1d2024;
-    --surface-container-lowest: #0e1014;
-    --on-surface: #e2e2e9;
-    --on-surface-variant: #c4c6d0;
-    --outline-variant: #44474e;
+    --primary: #a5d6b5;
+    --primary-container: #1c5e3c;
+    --surface: #10140f;
+    --surface-container-low: #191e18;
+    --surface-container-lowest: #0c0f0c;
+    --on-surface: #e2e6e1;
+    --on-surface-variant: #c3c9c2;
+    --outline-variant: #434a42;
   }
   
   body {

@@ -347,7 +347,7 @@ const normalizePaymentMethod = (item: any): PaymentMethod => ({
 const normalizeCustomCategory = (item: any): CustomCategory => ({
   id: Number(item.id),
   name: String(item.name || ''),
-  color: String(item.color || '#0054cd'),
+  color: String(item.color || '#2f7d52'),
   createdAt: item.createdAt ?? item.created_at,
   updatedAt: item.updatedAt ?? item.updated_at,
 });
@@ -488,7 +488,7 @@ export const api = {
       name: item.name,
       count: Number(item.count || 0),
       monthlyTotal: Number(item.monthlyTotal ?? item.monthly_total ?? 0),
-      color: item.color || '#0054cd',
+      color: item.color || '#2f7d52',
       isCustom: Boolean(item.isCustom ?? item.is_custom),
       customCategoryId: item.customCategoryId ?? item.custom_category_id ?? null,
     }));
