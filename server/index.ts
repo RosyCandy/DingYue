@@ -69,6 +69,12 @@ const CZL_CLIENT_ID = process.env.CZL_CLIENT_ID || '';
 const CZL_CLIENT_SECRET = process.env.CZL_CLIENT_SECRET || '';
 const CZL_BASE_URL = (process.env.CZL_BASE_URL || 'https://connect.czl.net').replace(/\/+$/, '');
 
+// 华为账号登录（HarmonyOS NEXT 客户端 Account Kit）：端侧拿到 idToken / authorizationCode 后提交。
+// HUAWEI_CLIENT_ID 为 AGC 里该应用（鸿蒙包名 com.dingyue.app.harmony）的 Client ID，多个用逗号分隔；
+// HUAWEI_CLIENT_SECRET 仅在客户端没拿到 idToken、需用 authorizationCode 换票时才需要。
+const HUAWEI_CLIENT_IDS = (process.env.HUAWEI_CLIENT_ID || '').split(',').map((v) => v.trim()).filter(Boolean);
+const HUAWEI_CLIENT_SECRET = process.env.HUAWEI_CLIENT_SECRET || '';
+
 // 邮件发送：未配置 SMTP 时退化为“开发模式”，验证码只打印到服务端日志，
 // 且仅在非生产环境随响应返回 devCode，方便本地调试。
 const SMTP_HOST = process.env.SMTP_HOST || '';
@@ -617,16 +623,16 @@ async function ensureDatabaseSchema() {
       : []
   );
   for (const column of [
-    'apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id', 'avatar',
+    'apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id', 'huawei_id', 'avatar',
     // 第三方账号的展示名（绑定状态页显示用户名用）
-    'apple_name', 'wechat_name', 'qq_name', 'czl_name', 'github_name', 'gitee_name',
+    'apple_name', 'wechat_name', 'qq_name', 'czl_name', 'github_name', 'gitee_name', 'huawei_name',
     'google_name'
   ]) {
     if (!userColumnNames.has(column)) {
       await pool.execute(`ALTER TABLE users ADD COLUMN ${column} VARCHAR(255) NULL`);
     }
   }
-  for (const indexName of ['uniq_users_apple_id', 'uniq_users_wechat_id', 'uniq_users_qq_id', 'uniq_users_czl_id', 'uniq_users_github_id', 'uniq_users_gitee_id']) {
+  for (const indexName of ['uniq_users_apple_id', 'uniq_users_wechat_id', 'uniq_users_qq_id', 'uniq_users_czl_id', 'uniq_users_github_id', 'uniq_users_gitee_id', 'uniq_users_huawei_id']) {
     const [existingIndexes]: any = await pool.query(
       `SHOW INDEX FROM users WHERE Key_name = '${indexName}'`
     );
@@ -1102,7 +1108,8 @@ const EMAIL_PLACEHOLDER_DOMAINS = [
   '@apple.placeholder',
   '@czl.placeholder',
   '@github.placeholder',
-  '@gitee.placeholder'
+  '@gitee.placeholder',
+  '@huawei.placeholder'
 ];
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -1398,7 +1405,7 @@ const consumeVerificationCode = async (email: string, purpose: CodePurpose, code
 // Social Login Helpers (Apple / WeChat / QQ)
 // ─────────────────────────────────────────────
 
-const SOCIAL_PROVIDER_COLUMNS = ['google_id', 'apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id'] as const;
+const SOCIAL_PROVIDER_COLUMNS = ['google_id', 'apple_id', 'wechat_id', 'qq_id', 'czl_id', 'github_id', 'gitee_id', 'huawei_id'] as const;
 type SocialProviderColumn = typeof SOCIAL_PROVIDER_COLUMNS[number];
 
 const findOrCreateSocialUser = async ({
@@ -1600,6 +1607,82 @@ const bindSocialAccount = async (
     `UPDATE users SET ${providerColumn} = ?, ${nameColumn} = ? WHERE id = ?`,
     [providerId, displayName, userId]
   );
+};
+
+// ── 华为账号：idToken 本地验签（JWKS）/ authorizationCode 换票 ─────────────
+// 文档：id_token 的 iss 固定 https://accounts.huawei.com，aud 为 Client ID，sub 为 UnionID。
+const HUAWEI_ISSUER = 'https://accounts.huawei.com';
+const HUAWEI_JWKS_URL = 'https://oauth-login.cloud.huawei.com/oauth2/v3/certs';
+const HUAWEI_TOKEN_URL = 'https://oauth-login.cloud.huawei.com/oauth2/v3/token';
+let huaweiJwksCache: { keys: Map<string, crypto.KeyObject>; fetchedAt: number } | null = null;
+
+const getHuaweiSigningKeys = async (forceRefresh = false): Promise<Map<string, crypto.KeyObject>> => {
+  if (!forceRefresh && huaweiJwksCache && Date.now() - huaweiJwksCache.fetchedAt < 6 * 60 * 60 * 1000) {
+    return huaweiJwksCache.keys;
+  }
+  const res = await directFetch(HUAWEI_JWKS_URL);
+  if (!res.ok) throw new Error(`获取华为公钥失败: ${res.status}`);
+  const data: any = await res.json();
+  const keys = new Map<string, crypto.KeyObject>();
+  for (const jwk of (data.keys || []) as Array<{ kid: string }>) {
+    keys.set(jwk.kid, crypto.createPublicKey({ key: jwk as crypto.JsonWebKey, format: 'jwk' }));
+  }
+  if (keys.size === 0) throw new Error('华为公钥列表为空');
+  huaweiJwksCache = { keys, fetchedAt: Date.now() };
+  return keys;
+};
+
+const verifyHuaweiIdToken = async (idToken: string): Promise<SocialProfile> => {
+  const decoded = jwt.decode(idToken, { complete: true });
+  if (!decoded || typeof decoded !== 'object' || !('header' in decoded)) {
+    throw new Error('无效的华为凭证');
+  }
+  const kid = (decoded as any).header?.kid;
+  let key = kid ? (await getHuaweiSigningKeys()).get(kid) : undefined;
+  if (!key && kid) key = (await getHuaweiSigningKeys(true)).get(kid);
+  if (!key) throw new Error('找不到匹配的华为公钥');
+
+  const payload = jwt.verify(idToken, key, {
+    algorithms: ['RS256', 'PS256'],
+    issuer: HUAWEI_ISSUER,
+    audience: HUAWEI_CLIENT_IDS as [string, ...string[]]
+  }) as jwt.JwtPayload;
+  if (!payload?.sub) throw new Error('华为凭证缺少用户标识');
+  const email = typeof payload.email === 'string' && payload.email.includes('@') && payload.email_verified
+    ? normalizeEmail(payload.email)
+    : null;
+  return {
+    id: String(payload.sub),
+    name: String(payload.nickname || payload.display_name || payload.name || '华为用户').trim(),
+    email,
+    providerColumn: 'huawei_id'
+  };
+};
+
+const exchangeHuaweiProfile = async (input: { idToken?: string; code?: string }): Promise<SocialProfile> => {
+  if (HUAWEI_CLIENT_IDS.length === 0) {
+    throw Object.assign(new Error('华为账号登录暂未配置，请联系管理员'), { status: 501 });
+  }
+  if (input.idToken) return verifyHuaweiIdToken(input.idToken);
+  if (!input.code) throw new Error('缺少华为登录凭证');
+  if (!HUAWEI_CLIENT_SECRET) {
+    throw Object.assign(new Error('华为账号登录暂未配置，请联系管理员'), { status: 501 });
+  }
+  const tokenRes = await directFetch(HUAWEI_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: input.code,
+      client_id: HUAWEI_CLIENT_IDS[0],
+      client_secret: HUAWEI_CLIENT_SECRET
+    }).toString()
+  });
+  const tokenData: any = await tokenRes.json();
+  if (!tokenData.id_token) {
+    throw new Error(tokenData.error_description || tokenData.sub_error_description || '无效 code');
+  }
+  return verifyHuaweiIdToken(tokenData.id_token);
 };
 
 type AppleJwk = { kid: string; kty: string; n: string; e: string };
@@ -2033,6 +2116,36 @@ app.post('/api/auth/czl', async (req, res) => {
   }
 });
 
+// POST /api/auth/huawei — HarmonyOS 客户端华为账号登录：提交 idToken（优先）或 authorizationCode
+app.post('/api/auth/huawei', async (req, res) => {
+  const { idToken, code } = req.body || {};
+  if (!idToken && !code) {
+    return res.status(400).json({ error: '缺少华为登录凭证' });
+  }
+  try {
+    const profile = await exchangeHuaweiProfile({
+      idToken: idToken ? String(idToken) : undefined,
+      code: code ? String(code) : undefined
+    });
+    const user = await findOrCreateSocialUser({
+      providerColumn: profile.providerColumn,
+      providerId: profile.id,
+      email: profile.email,
+      name: profile.name,
+      placeholderPrefix: 'huawei',
+      placeholderDomain: '@huawei.placeholder'
+    });
+    if (!user) {
+      return res.status(400).json({ error: '华为账号登录失败: 无法创建或匹配用户' });
+    }
+    res.json(buildAuthResponse(user));
+  } catch (e: any) {
+    if (e?.status === 501) return res.status(501).json({ error: e.message });
+    if (process.env.NODE_ENV !== 'production') console.error('Huawei login error:', e);
+    res.status(400).json({ error: '华为账号登录失败: ' + e.message });
+  }
+});
+
 // POST /api/auth/github — GitHub OAuth 登录后回传 code
 app.post('/api/auth/github', async (req, res) => {
   const { code } = req.body;
@@ -2155,7 +2268,7 @@ app.post('/api/auth/unbind/:provider', authRequired, async (req: AuthenticatedRe
   try {
     const userId = req.user!.userId;
     const [rows]: any = await pool.query(
-      `SELECT id, password_hash, google_id, apple_id, wechat_id, qq_id, czl_id, github_id, gitee_id
+      `SELECT id, password_hash, google_id, apple_id, wechat_id, qq_id, czl_id, github_id, gitee_id, huawei_id
        FROM users WHERE id = ? LIMIT 1`,
       [userId]
     );
@@ -2170,7 +2283,8 @@ app.post('/api/auth/unbind/:provider', authRequired, async (req: AuthenticatedRe
     const otherSocialCount = Object.values(BIND_PROVIDER_COLUMNS)
       .filter((col) => col !== column && user[col])
       .length
-      + (user.apple_id ? 1 : 0);
+      + (user.apple_id ? 1 : 0)
+      + (user.huawei_id ? 1 : 0);
     let passkeyCount = 0;
     if (!user.password_hash) {
       const [pkRows]: any = await pool.query(

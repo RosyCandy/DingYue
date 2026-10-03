@@ -30,7 +30,7 @@
 		</dict>
 		<dict>
 			<key>CFBundleURLName</key>
-			<string>com.duoduo.app.czlcallback</string>
+			<string>com.dingyue.app.czlcallback</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>duoduoapp</string>

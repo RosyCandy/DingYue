@@ -1,4 +1,4 @@
-package com.duoduo.app;
+package com.dingyue.app;
 
 import com.getcapacitor.BridgeActivity;
 
