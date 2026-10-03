@@ -70,7 +70,7 @@ const CZL_CLIENT_SECRET = process.env.CZL_CLIENT_SECRET || '';
 const CZL_BASE_URL = (process.env.CZL_BASE_URL || 'https://connect.czl.net').replace(/\/+$/, '');
 
 // 华为账号登录（HarmonyOS NEXT 客户端 Account Kit）：端侧拿到 idToken / authorizationCode 后提交。
-// HUAWEI_CLIENT_ID 为 AGC 里该应用（鸿蒙包名 com.dingyue.app.harmony）的 Client ID，多个用逗号分隔；
+// HUAWEI_CLIENT_ID 为 AGC 里该应用（鸿蒙包名 com.dingyue.app.hap）的 Client ID，多个用逗号分隔；
 // HUAWEI_CLIENT_SECRET 仅在客户端没拿到 idToken、需用 authorizationCode 换票时才需要。
 const HUAWEI_CLIENT_IDS = (process.env.HUAWEI_CLIENT_ID || '').split(',').map((v) => v.trim()).filter(Boolean);
 const HUAWEI_CLIENT_SECRET = process.env.HUAWEI_CLIENT_SECRET || '';
